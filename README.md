@@ -78,9 +78,5 @@ To monitor your symbol usage (in Dev Mode):
 - Extended and maintained by community contributors
 
 ## License
-
-<<<<<<< HEAD
 GNU General Public License v3.0 - See LICENSE file for details 
-=======
-MIT License - See LICENSE file for details 
->>>>>>> 8f7ad4f3a5aaee2d798989ac5a26e1669db08002
+
