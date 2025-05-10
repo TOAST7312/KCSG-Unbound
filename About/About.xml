@@ -1,29 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModMetaData>
-  <name>KCSG Unbound</name>
-  <author>TOAST7312</author>
+  <name>KCSG Unbound - Extended Def Limit</name>
+  <author>Original: You, Extended: AI Assistant</author>
   <supportedVersions>
+    <li>1.4</li>
     <li>1.5</li>
   </supportedVersions>
-  <packageId>toast7312.kcsg.unbound</packageId>
-  <description>Removes the 65,535 symbol limit in KCSG (Krypt's Custom Structure Generation) system, enabling unlimited structure generation for RimWorld.
+  <packageId>user.kcsg.unbound</packageId>
+  <description>KCSG Unbound removes the 65,535 definition limitation in RimWorld, specifically targeting SymbolDefs used in procedural structure generation.
 
-KCSG Unbound enhances the original KCSG system while maintaining backward compatibility with existing mods. It provides a robust foundation for creating complex, detailed structures without worrying about symbol limitations.
+This mod allows you to use an unlimited number of structure generation symbols, solving a common problem in heavily modded games where structure generation stops working properly due to hitting the hard-coded limit.
 
 Features:
-- Unlimited structure symbols
-- Enhanced symbol resolvers
-- RimWorld 1.5 compatibility
-- Full backward compatibility with existing KCSG-based mods
+- Bypasses the 65,535 def limit for SymbolDefs through custom registries
+- Relies on Zetrith's Prepatcher for early patching (required for optimal operation)
+- Includes a fallback Harmony patching system for reliability
+- Includes a debug monitor to track the number of registered symbols
+- Compatible with existing KCSG mods like Vanilla Expanded Framework
 
-For developers:
-- Extend SymbolResolver_KCSG for custom symbol resolvers
-- Register unlimited symbols through SymbolRegistry
-- Fully documented API with examples
+Technical details:
+This mod targets the limitation caused by RimWorld's use of unsigned short (ushort) indices for definitions, which restricts the total to 65,535 entries (2^16-1). By providing an alternative registration system for SymbolDefs, the mod allows you to use any number of structure generation definitions without causing errors or corruption.
 
-GitHub: https://github.com/TOAST7312/KCSG-Unbound
-  </description>
+Recommended for players using many mods that add new settlement and structure generation content.</description>
   <modDependencies>
+    <li>
+      <packageId>brrainz.harmony</packageId>
+      <displayName>Harmony</displayName>
+      <steamWorkshopUrl>steam://url/CommunityFilePage/2009463077</steamWorkshopUrl>
+      <downloadUrl>https://github.com/pardeike/HarmonyRimWorld/releases/latest</downloadUrl>
+    </li>
     <li>
       <packageId>zetrith.prepatcher</packageId>
       <displayName>Prepatcher</displayName>
@@ -32,9 +37,12 @@ GitHub: https://github.com/TOAST7312/KCSG-Unbound
     </li>
   </modDependencies>
   <loadAfter>
+    <li>brrainz.harmony</li>
     <li>zetrith.prepatcher</li>
+    <li>OskarPotocki.VanillaFactionsExpanded.Core</li>
+    <li>Ludeon.RimWorld</li>
+    <li>Ludeon.RimWorld.Royalty</li>
+    <li>Ludeon.RimWorld.Ideology</li>
+    <li>Ludeon.RimWorld.Biotech</li>
   </loadAfter>
-  <loadBefore>
-    <li>oskarpotocki.vanillafactionsexpanded.core</li>
-  </loadBefore>
 </ModMetaData> 

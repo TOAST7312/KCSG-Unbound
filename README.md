@@ -1,127 +1,80 @@
-# KCSG Unbound
+# KCSG Unbound - Extended Def Limit
 
-## Overview
-KCSG Unbound is an enhanced version of the KCSG (Krypt's Custom Structure Generation) system for RimWorld. It removes the limitation of 65,535 symbols in the vanilla KCSG implementation, enabling unlimited structure generation capabilities.
+KCSG Unbound removes the 65,535 definition limitation in RimWorld, specifically targeting SymbolDefs used in procedural structure generation.
+
+## What This Mod Does
+
+RimWorld has a hard-coded limit of 65,535 definitions (Defs) per type, including SymbolDefs used in structure generation. This is due to the game using a 16-bit unsigned integer (ushort) for indexing. When you have many mods that add new structures, settlements, and custom symbols, you can hit this limit, causing errors or broken functionality.
+
+KCSG Unbound provides an alternative registration system that:
+1. Intercepts SymbolDef registration
+2. Stores symbols in an unlimited dictionary instead of the vanilla array
+3. Handles lookups transparently for both old and new defs
 
 ## Features
-- **Unlimited Symbols**: Removes the 65,535 symbol limit in the original KCSG system
-- **Enhanced Structure Generation**: Improves the existing structure generation system
-- **Backward Compatibility**: Works alongside the original KCSG system without breaking existing mods
-- **RimWorld 1.5 Support**: Fully compatible with RimWorld version 1.5
 
-## Technical Architecture
-KCSG Unbound consists of several core components that work together to enhance structure generation:
+- **Unlimited SymbolDefs**: No more hitting the 65,535 limit for structure generation
+- **Compatible with existing mods**: Works with Vanilla Expanded Framework and other KCSG-based mods
+- **Monitoring system**: Includes a debug window (in dev mode) to track symbol usage
+- **Dual implementation**: Relies on Zetrith's Prepatcher for early patching with Harmony fallback for reliability
 
-### Core Components
-1. **SymbolRegistry**: Manages unlimited structure generation symbols, bypassing the original 65,535 limit
-2. **SymbolResolver_KCSG**: Base class for all KCSG symbol resolvers
-3. **KCSGPrepatch**: Provides Harmony patches for integration with the original KCSG system
-4. **PrepatcherFields**: Enables integration with Zetrith's Prepatcher for early patching
-5. **ResolveParamsExtensions**: Extends RimWorld's ResolveParams with custom properties
+## Technical Details
 
-### Symbol Resolvers
-- **SymbolResolver_Building**: Places specific buildings
-- **SymbolResolver_RandomBuilding**: Places randomly selected buildings from a list
+The mod employs two primary strategies to bypass the 65,535 def limit:
 
-## Installation
-1. Ensure you have [Zetrith's Prepatcher](https://github.com/Zetrith/Prepatcher) installed
-2. Download the latest release of KCSG Unbound
-3. Extract to your RimWorld Mods folder
-4. Enable in the mod menu, placing after Prepatcher and before any mods that depend on KCSG
+1. **Custom Registry**: All SymbolDefs are registered in a parallel dictionary-based system
+2. **Transparent Lookup**: Intercepts DefDatabase.GetNamed and GetByShortHash calls to check both registries
 
-## For Developers
-### Integration
-To use KCSG Unbound in your mod:
+### Implementation Details
 
-1. Add a dependency in your About.xml:
-```xml
-<modDependencies>
-  <li>
-    <packageId>zetrith.prepatcher</packageId>
-    <displayName>Prepatcher</displayName>
-    <steamWorkshopUrl>steam://url/CommunityFilePage/2934420800</steamWorkshopUrl>
-  </li>
-  <li>
-    <packageId>toast7312.kcsg.unbound</packageId>
-    <displayName>KCSG Unbound</displayName>
-    <steamWorkshopUrl>TBD</steamWorkshopUrl>
-  </li>
-</modDependencies>
-```
+- The SymbolRegistry class maintains a dictionary of unlimited size for both symbols and defs
+- Harmony patches intercept critical methods to ensure our custom registry is checked
+- Zetrith's Prepatcher support provides early loading and better compatibility
 
-2. Register your symbol resolvers during initialization:
-```csharp
-// Example: Register a custom symbol resolver
-SymbolRegistry.Register("MyCustomSymbol", typeof(SymbolResolver_MyCustomThing));
-```
+## For Modders
 
-### Creating Custom Symbol Resolvers
-Custom symbol resolvers should extend `SymbolResolver_KCSG`:
+If you're a mod author adding many SymbolDefs, you don't need to change anything in your code. This mod will automatically handle the registration and resolution of your defs.
+
+For more advanced usage, you can directly use the SymbolRegistry API:
 
 ```csharp
-using KCSG;
-using RimWorld;
-using Verse;
+// Register a symbol resolver
+SymbolRegistry.Register("MyCustomSymbol", typeof(MyCustomSymbolResolver));
 
-public class SymbolResolver_MyCustomThing : SymbolResolver_KCSG
-{
-    protected override void ResolveInt(ResolveParams rp)
-    {
-        // Your symbol resolution logic here
-        // Use helper methods from SymbolResolver_KCSG
-    }
-}
+// Register a symbol def directly
+SymbolRegistry.RegisterDef("MyCustomSymbolDef", mySymbolDefInstance);
+
+// Check if a symbol is registered
+bool exists = SymbolRegistry.IsRegistered("MyCustomSymbol");
+
+// Get monitoring information
+string status = SymbolRegistry.GetStatusReport();
 ```
 
-### Build Instructions
-1. Ensure you have .NET SDK 4.7.2+ installed
-2. Open the solution in Visual Studio, Rider, or Visual Studio Code
-3. Restore NuGet packages
-4. Build the solution
-5. The compiled assembly will be placed in the 1.5/Assemblies directory
+## For Players
 
-## Technical Implementation Notes
+1. Subscribe to this mod and its dependencies:
+   - Harmony
+   - Zetrith's Prepatcher (required for early patching)
+2. Make sure it loads after Prepatcher and before any mods that add many structure generation symbols
+3. Enjoy your heavily modded game without the 65,535 symbol limit!
 
-### Prepatcher Integration
-KCSG Unbound uses Zetrith's Prepatcher for very early patching capabilities:
+To monitor your symbol usage (in Dev Mode):
+1. Enable Dev Mode in the options
+2. Click the "Symbol Monitor" button in the top-right corner of the screen
+3. View detailed statistics about your registered symbols
 
-```csharp
-[PrepatcherField]
-public static extern ref bool IsPrepatched(this KCSGPrepatchData data);
-```
+## Compatibility
 
-This pattern allows KCSG Unbound to inject fields into the KCSGPrepatchData class at load time, before standard mods are initialized.
-
-### Extending ResolveParams
-To maintain compatibility with RimWorld's BaseGen system while adding custom functionality, we extend ResolveParams with extension methods:
-
-```csharp
-public static ThingDef GetThingDef(this ResolveParams rp) => rp.GetCustom<ThingDef>("thingDef");
-public static void SetThingDef(this ResolveParams rp, ThingDef value) => rp.SetCustom("thingDef", value);
-```
-
-### Symbol Resolution
-Symbols are resolved through a three-step process:
-1. Check the main VEF's KCSG registry first (for backward compatibility)
-2. Check our unlimited SymbolRegistry if not found in the main registry
-3. Fall back to RimWorld's default resolution if not found in either
-
-## License
-MIT License
+- Compatible with RimWorld 1.4 and 1.5
+- Works with Vanilla Expanded Framework
+- Compatible with mods adding custom structure generation
 
 ## Credits
-- Original KCSG system by Oskar Potocki and Vanilla Expanded Framework team
-- Prepatcher by Zetrith
-- KCSG Unbound by TeH_Dav
 
-## Contributing
-Contributions are welcome! Please feel free to submit a pull request.
+- Original KCSG system by Vanilla Expanded Framework team
+- Extended and maintained by community contributors
 
-### Guidelines
-- Follow the existing code style
-- Add comments to explain complex logic
-- Test thoroughly with various mod combinations
-- Document any new features in the README
+## License
 
-## Contact
-GitHub: [TOAST7312](https://github.com/TOAST7312) 
+MIT License - See LICENSE file for details 
