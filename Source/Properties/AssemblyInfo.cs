@@ -36,8 +36,6 @@ using System.Runtime.InteropServices;
 // Make internal methods visible to the prepatcher systems
 [assembly: InternalsVisibleTo("ZetrithPrepatcher")]
 
-// Allow access to Assembly-CSharp internals
-[assembly: IgnoresAccessChecksTo("Assembly-CSharp")] 
-
-// Add this line to your AssemblyInfo.cs
+// Properly specify the prepatcher attribute
+// The class should be fully qualified name if it's in a namespace
 [assembly: ZetrithPrepatcher.Prepatch("KCSG.KCSGPrepatch", "PatchAll")]

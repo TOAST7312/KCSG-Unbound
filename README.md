@@ -107,7 +107,7 @@ Symbols are resolved through a three-step process:
 3. Fall back to RimWorld's default resolution if not found in either
 
 ## License
-GPL 3.0
+MIT License
 
 ## Credits
 - Original KCSG system by Oskar Potocki and Vanilla Expanded Framework team

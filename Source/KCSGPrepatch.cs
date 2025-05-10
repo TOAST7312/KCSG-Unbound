@@ -11,7 +11,7 @@ using KCSG;
 namespace KCSG
 {
     // This class will be found by Prepatcher through AssemblyInfo's InternalsVisibleTo attribute
-    internal static class KCSGPrepatch
+    public static class KCSGPrepatch
     {
         // Static constructor - runs as soon as class is loaded
         static KCSGPrepatch()
@@ -72,7 +72,7 @@ namespace KCSG
         // PatchAll is called by Prepatcher during very early loading
         // This specific signature is required by Zetrith's Prepatcher
         // The method must be public static bool PatchAll() or internal static bool PatchAll()
-        internal static bool PatchAll()
+        public static bool PatchAll()
         {
             try
             {
