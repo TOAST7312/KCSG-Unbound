@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>KCSG Unbound</name>
+  <author>TOAST7312</author>
+  <supportedVersions>
+    <li>1.5</li>
+  </supportedVersions>
+  <packageId>toast7312.kcsg.unbound</packageId>
+  <description>Removes the 65,535 symbol limit in KCSG (Krypt's Custom Structure Generation) system, enabling unlimited structure generation for RimWorld.
+
+KCSG Unbound enhances the original KCSG system while maintaining backward compatibility with existing mods. It provides a robust foundation for creating complex, detailed structures without worrying about symbol limitations.
+
+Features:
+- Unlimited structure symbols
+- Enhanced symbol resolvers
+- RimWorld 1.5 compatibility
+- Full backward compatibility with existing KCSG-based mods
+
+For developers:
+- Extend SymbolResolver_KCSG for custom symbol resolvers
+- Register unlimited symbols through SymbolRegistry
+- Fully documented API with examples
+
+GitHub: https://github.com/TOAST7312/KCSG-Unbound
+  </description>
+  <modDependencies>
+    <li>
+      <packageId>zetrith.prepatcher</packageId>
+      <displayName>Prepatcher</displayName>
+      <steamWorkshopUrl>steam://url/CommunityFilePage/2934420800</steamWorkshopUrl>
+      <downloadUrl>https://github.com/Zetrith/Prepatcher/releases/latest</downloadUrl>
+    </li>
+  </modDependencies>
+  <loadAfter>
+    <li>zetrith.prepatcher</li>
+  </loadAfter>
+  <loadBefore>
+    <li>oskarpotocki.vanillafactionsexpanded.core</li>
+  </loadBefore>
+</ModMetaData> 

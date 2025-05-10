@@ -1,0 +1,3 @@
+D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\Source\obj\Debug\KCSGUnbound.csproj.AssemblyReference.cache
+D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\Source\obj\Debug\KCSGUnbound.GeneratedMSBuildEditorConfig.editorconfig
+D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\Source\obj\Debug\KCSGUnbound.csproj.CoreCompileInputs.cache
