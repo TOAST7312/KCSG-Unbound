@@ -1,10 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <LangVersion>latest</LangVersion>
     <AssemblyName>0KCSG</AssemblyName>
-    <AssemblyVersion>1.1.2.0</AssemblyVersion>
-    <FileVersion>1.1.2.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
     <RootNamespace>KCSG</RootNamespace>
     <OutputPath>..\\Assemblies</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -14,6 +14,7 @@
     <BaseOutputPath>..\\Assemblies</BaseOutputPath>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <NoWarn>$(NoWarn);CS8632;CS8600;CS8601;CS8602;CS8603;CS8604;NU1701</NoWarn>
   </PropertyGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
@@ -21,16 +22,11 @@
   </Target>
 
   <ItemGroup>
-    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.5.4167-beta" />
+    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.5.4409" />
     <PackageReference Include="Lib.Harmony" Version="2.2.2" ExcludeAssets="runtime" />
-    <PackageReference Include="Zetrith.Prepatcher" Version="1.2.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="0PrepatcherAPI">
-      <HintPath>..\\Assemblies\\0PrepatcherAPI.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
@@ -55,9 +51,6 @@
 
   <ItemGroup>
     <Compile Include="KCSG.cs" />
-    <Compile Include="KCSGPrepatch.cs" />
-    <Compile Include="HarmonyInit.cs" />
-    <Compile Include="ZetrithPrepatcher.cs" />
     <Compile Include="CustomGenOption.cs" />
     <Compile Include="StructureLayoutDef.cs" />
     <Compile Include="SettlementLayoutDef.cs" />
@@ -72,11 +65,12 @@
     <Compile Include="System\Runtime\CompilerServices\IgnoresAccessChecksToAttribute.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SymbolRegistry.cs" />
-    <Compile Include="PrepatcherFields.cs" />
     <Compile Include="SymbolResolver_KCSG.cs" />
     <Compile Include="Resolvers\SymbolResolver_Building.cs" />
     <Compile Include="KCSG_Init.cs" />
     <Compile Include="HarmonyPatches.cs" />
     <Compile Include="ResolveParamsExtensions.cs" />
+    <Compile Include="SymbolDefMonitor.cs" />
+    <Compile Include="KCSGUnboundMod.cs" />
   </ItemGroup>
 </Project> 

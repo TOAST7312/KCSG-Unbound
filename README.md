@@ -16,7 +16,7 @@ KCSG Unbound provides an alternative registration system that:
 - **Unlimited SymbolDefs**: No more hitting the 65,535 limit for structure generation
 - **Compatible with existing mods**: Works with Vanilla Expanded Framework and other KCSG-based mods
 - **Monitoring system**: Includes a debug window (in dev mode) to track symbol usage
-- **Dual implementation**: Relies on Zetrith's Prepatcher for early patching with Harmony fallback for reliability
+- **Early patching**: Uses Harmony in the mod constructor to patch before def loading begins
 
 ## Technical Details
 
@@ -29,7 +29,7 @@ The mod employs two primary strategies to bypass the 65,535 def limit:
 
 - The SymbolRegistry class maintains a dictionary of unlimited size for both symbols and defs
 - Harmony patches intercept critical methods to ensure our custom registry is checked
-- Zetrith's Prepatcher support provides early loading and better compatibility
+- Early patching ensures the system is in place before def loading begins
 
 ## For Modders
 
@@ -55,8 +55,7 @@ string status = SymbolRegistry.GetStatusReport();
 
 1. Subscribe to this mod and its dependencies:
    - Harmony
-   - Zetrith's Prepatcher (required for early patching)
-2. Make sure it loads after Prepatcher and before any mods that add many structure generation symbols
+2. Make sure it loads after Harmony and before any mods that add many structure generation symbols
 3. Enjoy your heavily modded game without the 65,535 symbol limit!
 
 To monitor your symbol usage (in Dev Mode):
@@ -77,4 +76,4 @@ To monitor your symbol usage (in Dev Mode):
 
 ## License
 
-MIT License - See LICENSE file for details 
+GNU General Public License v3.0 - See LICENSE file for details 

@@ -246,6 +246,71 @@ namespace KCSG
             // Flag to track if we've initialized our hash cache
             private static bool hashCacheInitialized = false;
             
+            // Cache the hash method once we find it
+            private static MethodInfo shortHashMethod = null;
+            
+            // Get the hash method using reflection
+            private static ushort CalculateShortHash(string text)
+            {
+                // Initialize method if not done already
+                if (shortHashMethod == null)
+                {
+                    Type shortHashGiverType = typeof(ShortHashGiver);
+                    
+                    // Try different possible method names
+                    string[] possibleMethodNames = new string[] { "GetShortHash", "GiveShortHash", "GiveShortHashString", "GetHashForString" };
+                    
+                    foreach (string methodName in possibleMethodNames)
+                    {
+                        shortHashMethod = shortHashGiverType.GetMethod(methodName, 
+                            BindingFlags.Public | BindingFlags.Static, 
+                            null, 
+                            new Type[] { typeof(string) }, 
+                            null);
+                        
+                        if (shortHashMethod != null && shortHashMethod.ReturnType == typeof(ushort))
+                        {
+                            Log.Message($"[KCSG Unbound] Found hash method: {methodName}");
+                            break;
+                        }
+                    }
+                    
+                    // If still not found, try to find any method that takes a string and returns ushort
+                    if (shortHashMethod == null)
+                    {
+                        foreach (MethodInfo method in shortHashGiverType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                        {
+                            if (method.ReturnType == typeof(ushort) && 
+                                method.GetParameters().Length == 1 && 
+                                method.GetParameters()[0].ParameterType == typeof(string))
+                            {
+                                shortHashMethod = method;
+                                Log.Message($"[KCSG Unbound] Found fallback hash method: {method.Name}");
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Last resort - try to create a hash manually
+                    if (shortHashMethod == null)
+                    {
+                        Log.Error("[KCSG Unbound] Could not find a suitable hash method, using simple hash fallback");
+                        return (ushort)(text.GetHashCode() & 0xFFFF);
+                    }
+                }
+                
+                // Invoke the found method
+                try
+                {
+                    return (ushort)shortHashMethod.Invoke(null, new object[] { text });
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG Unbound] Error calculating hash for '{text}': {ex}");
+                    return (ushort)(text.GetHashCode() & 0xFFFF);
+                }
+            }
+            
             // Use Prepare to dynamically locate the method to patch
             public static bool Prepare()
             {
@@ -285,7 +350,7 @@ namespace KCSG
                     {
                         if (string.IsNullOrEmpty(defName)) continue;
                         
-                        ushort hash = ShortHashGiver.GiveShortHash(defName);
+                        ushort hash = CalculateShortHash(defName);
                         hashToDefName[hash] = defName;
                         defNameToHash[defName] = hash;
                     }
@@ -306,7 +371,7 @@ namespace KCSG
                 
                 try
                 {
-                    ushort hash = ShortHashGiver.GiveShortHash(defName);
+                    ushort hash = CalculateShortHash(defName);
                     hashToDefName[hash] = defName;
                     defNameToHash[defName] = hash;
                 }

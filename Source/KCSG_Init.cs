@@ -32,40 +32,8 @@ namespace KCSG
                 System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
                 stopwatch.Start();
 
-                // Check if we're using Prepatcher
-                bool usePrepatcher = false;
-                try
-                {
-                    // First check if we're already marked as prepatched
-                    usePrepatcher = KCSGPrepatchData.Instance.IsPrepatched();
-                    
-                    // If not, check if the Prepatcher type exists (it would be loaded if available)
-                    if (!usePrepatcher)
-                    {
-                        Type prepatcherType = Type.GetType("Prepatcher.PrepatcherMod, 0PrepatcherAPI");
-                        usePrepatcher = prepatcherType != null;
-                        
-                        // If we found the type but aren't marked as prepatched, set it now
-                        if (usePrepatcher)
-                        {
-                            KCSGPrepatchData.Instance.SetPrepatched(true);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning($"[KCSG Unbound] Error checking prepatcher status: {ex}. Will use runtime patching instead.");
-                }
-
-                // Setup Harmony patches unless we've already been prepatched
-                if (!usePrepatcher)
-                {
-                    SetupHarmony();
-                }
-                else
-                {
-                    Log.Message("[KCSG Unbound] Using prepatcher, skipping runtime patching");
-                }
+                // NOTE: Harmony patching is now handled earlier in KCSGUnboundMod constructor
+                // This ensures patches are applied before def loading begins
 
                 // Initialize symbol registry if not done already
                 if (!SymbolRegistry.Initialized)
@@ -136,7 +104,9 @@ namespace KCSG
             {
                 // Find RimWorld's built-in resolvers we can use if custom ones aren't available
                 Type buildingResolver = typeof(RimWorld.BaseGen.SymbolResolver_SingleThing);
-                Type randomBuildingResolver = typeof(RimWorld.BaseGen.SymbolResolver_RandomBuilding);
+                
+                // Note: SymbolResolver_RandomBuilding doesn't exist in RimWorld 1.5 - using another resolver as fallback
+                Type randomBuildingResolver = typeof(RimWorld.BaseGen.SymbolResolver_SingleThing);
                 
                 // Get types from BaseGen namespace as fallbacks
                 List<Type> availableResolverTypes = GetAvailableSymbolResolverTypes();
@@ -277,7 +247,7 @@ namespace KCSG
                 {
                     if (Current.Game.GetComponent<SymbolDefMonitor>() == null)
                     {
-                        Current.Game.Components.Add(new SymbolDefMonitor(Current.Game));
+                        Current.Game.components.Add(new SymbolDefMonitor(Current.Game));
                         Log.Message("[KCSG Unbound] SymbolDefMonitor component added to current game");
                     }
                 }
@@ -292,29 +262,6 @@ namespace KCSG
             }
         }
 
-        /// <summary>
-        /// Setup Harmony patches for runtime operation when prepatcher isn't used
-        /// </summary>
-        private static void SetupHarmony()
-        {
-            try
-            {
-                Log.Message("[KCSG Unbound] Setting up runtime Harmony patches");
-                
-                // Create a new harmony instance
-                Harmony harmony = new Harmony("com.kcsg.unbound");
-                
-                // Apply all patches from patch classes in this assembly
-                harmony.PatchAll();
-                
-                Log.Message("[KCSG Unbound] Runtime Harmony patches applied successfully");
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[KCSG Unbound] Error applying runtime Harmony patches: {ex}");
-            }
-        }
-        
         /// <summary>
         /// Check if KCSG Unbound initialized successfully
         /// </summary>

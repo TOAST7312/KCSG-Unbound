@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 // General Information about the assembly
 [assembly: AssemblyTitle("0KCSG")]
-[assembly: AssemblyDescription("Krypt's Common Structure Generation for RimWorld")]
+[assembly: AssemblyDescription("Krypt's Common Structure Generation Unbound - Extended Def Limit")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("0KCSG")]
@@ -30,12 +30,5 @@ using System.Runtime.InteropServices;
 // You can specify all the values or you can default the Build and Revision Numbers 
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("1.1.2.0")]
-[assembly: AssemblyFileVersion("1.1.2.0")]
-
-// Make internal methods visible to the prepatcher systems
-[assembly: InternalsVisibleTo("ZetrithPrepatcher")]
-
-// Properly specify the prepatcher attribute
-// The class should be fully qualified name if it's in a namespace
-[assembly: ZetrithPrepatcher.Prepatch("KCSG.KCSGPrepatch", "PatchAll")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]

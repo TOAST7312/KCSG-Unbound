@@ -223,18 +223,9 @@ namespace KCSG
                 Widgets.Label(new Rect(statusRect.x, statusY, statusRect.width, lineHeight), $"Status: {color}{status}</color>");
                 statusY += lineHeight;
                 
-                bool isPrepatched = false;
-                try 
-                {
-                    isPrepatched = KCSGPrepatchData.Instance.IsPrepatched();
-                }
-                catch 
-                {
-                    // In case of error, assume not prepatched
-                }
-                
+                // Simplified mode description since we're not using prepatcher anymore
                 Widgets.Label(new Rect(statusRect.x, statusY, statusRect.width, lineHeight), 
-                    $"Unbound mode: {(isPrepatched ? "<color=green>Prepatched</color>" : "<color=yellow>Runtime</color>")}");
+                    "Unbound mode: <color=green>Active</color>");
                 statusY += lineHeight;
                 
                 // Draw action buttons
@@ -340,18 +331,6 @@ namespace KCSG
             {
                 Log.Message($"Status: Within vanilla limits ({registeredDefsCount} / 65535)");
             }
-            
-            bool isPrepatched = false;
-            try 
-            {
-                isPrepatched = KCSGPrepatchData.Instance.IsPrepatched();
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[KCSG Unbound] Error checking prepatch status: {ex}");
-            }
-            
-            Log.Message($"Prepatched mode active: {isPrepatched}");
             
             if (hadErrors)
             {

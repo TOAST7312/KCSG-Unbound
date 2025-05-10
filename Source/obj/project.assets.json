@@ -2,7 +2,7 @@
   "version": 3,
   "targets": {
     ".NETFramework,Version=v4.7.2": {
-      "Krafs.Rimworld.Ref/1.5.4184-beta": {
+      "Krafs.Rimworld.Ref/1.5.4409": {
         "type": "package",
         "compile": {
           "ref/net472/Assembly-CSharp-firstpass.dll": {},
@@ -104,34 +104,21 @@
             "related": ".xml"
           }
         }
-      },
-      "Zetrith.Prepatcher/1.2.0": {
-        "type": "package",
-        "compile": {
-          "lib/net472/0PrepatcherAPI.dll": {
-            "related": ".xml"
-          }
-        },
-        "runtime": {
-          "lib/net472/0PrepatcherAPI.dll": {
-            "related": ".xml"
-          }
-        }
       }
     }
   },
   "libraries": {
-    "Krafs.Rimworld.Ref/1.5.4184-beta": {
-      "sha512": "THZdhv2qYlekS++Me2znEtcU7spq1yTz+9VGfASUDLz+SWbD+63JsmG1zR8b9sCMomx45vujxeKiIfjSHS4mcA==",
+    "Krafs.Rimworld.Ref/1.5.4409": {
+      "sha512": "0Sn9Ow0hbsQ1pmwHoKmcAzhMkv/BjHrIpZOH4eyUwHx238a3+2jDqNwCggKR8E3BouNeIOQuNcyMrc78slOtaA==",
       "type": "package",
-      "path": "krafs.rimworld.ref/1.5.4184-beta",
+      "path": "krafs.rimworld.ref/1.5.4409",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
         "LICENSE.md",
         "README.md",
         "icon.png",
-        "krafs.rimworld.ref.1.5.4184-beta.nupkg.sha512",
+        "krafs.rimworld.ref.1.5.4409.nupkg.sha512",
         "krafs.rimworld.ref.nuspec",
         "ref/net472/Assembly-CSharp-firstpass.dll",
         "ref/net472/Assembly-CSharp.dll",
@@ -248,26 +235,12 @@
         "lib/netcoreapp3.1/0Harmony.dll",
         "lib/netcoreapp3.1/0Harmony.xml"
       ]
-    },
-    "Zetrith.Prepatcher/1.2.0": {
-      "sha512": "pH7b3RD4mH5chxweElEXy8/9D2URxky5Gfo8qOhtmgBxDWcH77OinmyFwdMG75BixP/aJNM0kPdd3jfDJmZrFg==",
-      "type": "package",
-      "path": "zetrith.prepatcher/1.2.0",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "lib/net472/0PrepatcherAPI.dll",
-        "lib/net472/0PrepatcherAPI.xml",
-        "zetrith.prepatcher.1.2.0.nupkg.sha512",
-        "zetrith.prepatcher.nuspec"
-      ]
     }
   },
   "projectFileDependencyGroups": {
     ".NETFramework,Version=v4.7.2": [
-      "Krafs.Rimworld.Ref >= 1.5.4167-beta",
-      "Lib.Harmony >= 2.2.2",
-      "Zetrith.Prepatcher >= 1.2.0"
+      "Krafs.Rimworld.Ref >= 1.5.4409",
+      "Lib.Harmony >= 2.2.2"
     ]
   },
   "packageFolders": {
@@ -305,6 +278,9 @@
         }
       },
       "warningProperties": {
+        "noWarn": [
+          "NU1701"
+        ],
         "warnAsError": [
           "NU1605"
         ]
@@ -322,32 +298,16 @@
         "dependencies": {
           "Krafs.Rimworld.Ref": {
             "target": "Package",
-            "version": "[1.5.4167-beta, )"
+            "version": "[1.5.4409, )"
           },
           "Lib.Harmony": {
             "include": "Compile, Build, Native, ContentFiles, Analyzers, BuildTransitive",
             "target": "Package",
             "version": "[2.2.2, )"
-          },
-          "Zetrith.Prepatcher": {
-            "target": "Package",
-            "version": "[1.2.0, )"
           }
         },
         "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.203\\RuntimeIdentifierGraph.json"
       }
     }
-  },
-  "logs": [
-    {
-      "code": "NU1603",
-      "level": "Warning",
-      "warningLevel": 1,
-      "message": "0KCSG depends on Krafs.Rimworld.Ref (>= 1.5.4167-beta) but Krafs.Rimworld.Ref 1.5.4167-beta was not found. Krafs.Rimworld.Ref 1.5.4184-beta was resolved instead.",
-      "libraryId": "Krafs.Rimworld.Ref",
-      "targetGraphs": [
-        ".NETFramework,Version=v4.7.2"
-      ]
-    }
-  ]
+  }
 }
