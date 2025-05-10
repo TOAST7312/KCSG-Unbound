@@ -1,5 +1,8 @@
 # KCSG Unbound - Extended Def Limit
 
+##THIS MOD IS NOT FEATURE-COMPLETE!
+The below-listed features may or may not be implemented in the current version. The readme serves as information toward the goal of the mod and will evolve with ongoing changes.
+
 KCSG Unbound removes the 65,535 definition limitation in RimWorld, specifically targeting SymbolDefs used in procedural structure generation.
 
 ## What This Mod Does
@@ -76,4 +79,5 @@ To monitor your symbol usage (in Dev Mode):
 
 ## License
 
+GNU General Public License v3.0 - See LICENSE file for details <<<<<<< HEAD
 GNU General Public License v3.0 - See LICENSE file for details 
