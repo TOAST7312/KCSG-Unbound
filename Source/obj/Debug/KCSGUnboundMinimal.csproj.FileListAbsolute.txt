@@ -1,7 +1,0 @@
-D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\Source\obj\Debug\KCSGUnboundMinimal.csproj.AssemblyReference.cache
-D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\Source\obj\Debug\KCSGUnboundMinimal.GeneratedMSBuildEditorConfig.editorconfig
-D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\Source\obj\Debug\KCSGUnboundMinimal.csproj.CoreCompileInputs.cache
-D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\1.5\Assemblies\KCSGMinimal.dll
-D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\1.5\Assemblies\KCSGMinimal.pdb
-D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\Source\obj\Debug\KCSGMinimal.dll
-D:\Games & Programs\Steam\steamapps\common\RimWorld\Mods\KCSG Unbound\Source\obj\Debug\KCSGMinimal.pdb
