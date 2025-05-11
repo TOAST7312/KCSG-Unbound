@@ -1,25 +1,34 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net472</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <AssemblyName>0KCSG</AssemblyName>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
-    <RootNamespace>KCSG</RootNamespace>
-    <OutputPath>..\\Assemblies</OutputPath>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>preview</LangVersion>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>..\Assemblies\</OutputPath>
+    <AssemblyName>0KCSG</AssemblyName>
+    <RootNamespace>KCSG</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
     <GenerateDocumentationFile>False</GenerateDocumentationFile>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
     <Nullable>disable</Nullable>
     <BaseOutputPath>..\\Assemblies</BaseOutputPath>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <NoWarn>$(NoWarn);CS8632;CS8600;CS8601;CS8602;CS8603;CS8604;NU1701</NoWarn>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DefineConstants>$(DefineConstants)TRACE;DEBUG</DefineConstants>
   </PropertyGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <!-- No need for any post-build copy since we output directly to Assemblies -->
   </Target>
+
+  <ItemGroup>
+    <EmbeddedResource Remove="System\**" />
+    <None Remove="System\**" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Krafs.Rimworld.Ref" Version="1.5.4409" />
@@ -29,14 +38,14 @@
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
       <HintPath>Assembly-CSharp.dll</HintPath>
-      <Private>false</Private>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>..\..\..\RimWorldWin64_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine">
       <HintPath>UnityEngine.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine.CoreModule">
-      <HintPath>UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
@@ -50,27 +59,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="KCSG.cs" />
-    <Compile Include="CustomGenOption.cs" />
-    <Compile Include="StructureLayoutDef.cs" />
-    <Compile Include="SettlementLayoutDef.cs" />
-    <Compile Include="TiledStructureDef.cs" />
-    <Compile Include="GenOption.cs" />
-    <Compile Include="TileUtils.cs" />
-    <Compile Include="RandomUtils.cs" />
-    <Compile Include="LayoutUtils.cs" />
-    <Compile Include="Debug.cs" />
-    <Compile Include="Utility\ReflectionCache.cs" />
-    <Compile Include="Utility\VEFIntegration.cs" />
-    <Compile Include="System\Runtime\CompilerServices\IgnoresAccessChecksToAttribute.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="SymbolRegistry.cs" />
-    <Compile Include="SymbolResolver_KCSG.cs" />
-    <Compile Include="Resolvers\SymbolResolver_Building.cs" />
-    <Compile Include="KCSG_Init.cs" />
-    <Compile Include="HarmonyPatches.cs" />
-    <Compile Include="ResolveParamsExtensions.cs" />
-    <Compile Include="SymbolDefMonitor.cs" />
-    <Compile Include="KCSGUnboundMod.cs" />
+    <Compile Include="**\*.cs" />
   </ItemGroup>
 </Project> 

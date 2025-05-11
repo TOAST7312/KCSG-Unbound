@@ -9,406 +9,394 @@ using Verse;
 namespace KCSG
 {
     /// <summary>
-    /// Contains Harmony patches for KCSG Unbound
-    /// These are used when the prepatcher is not available
+    /// Contains all Harmony patches for KCSG Unbound
     /// </summary>
     public static class HarmonyPatches
     {
-        // Patch for KCSG.SymbolResolver.AddDef method
-        [HarmonyPatch]
-        public static class Patch_SymbolResolver_AddDef
-        {
-            // Use Prepare to dynamically locate the method to patch
-            public static bool Prepare()
-            {
-                return AccessTools.Method("KCSG.SymbolResolver:AddDef") != null;
-            }
-            
-            // Use TargetMethod to specify the method to patch
-            public static MethodBase TargetMethod()
-            {
-                return AccessTools.Method("KCSG.SymbolResolver:AddDef");
-            }
-            
-            // Prefix method that mirrors the prepatcher functionality
-            public static bool Prefix(string symbolDef, Type resolver)
-            {
-                // Register with our system
-                SymbolRegistry.Register(symbolDef, resolver);
-                
-                // Still let the original method run - this is important for backward compatibility
-                return true;
-            }
-        }
-        
-        // Patch for KCSG.SymbolResolver.MaxSymbolsReached method
-        [HarmonyPatch]
-        public static class Patch_SymbolResolver_MaxSymbolsReached
-        {
-            // Use Prepare to dynamically locate the method to patch
-            public static bool Prepare()
-            {
-                return AccessTools.Method("KCSG.SymbolResolver:MaxSymbolsReached") != null;
-            }
-            
-            // Use TargetMethod to specify the method to patch
-            public static MethodBase TargetMethod()
-            {
-                return AccessTools.Method("KCSG.SymbolResolver:MaxSymbolsReached");
-            }
-            
-            // Prefix method that mirrors the prepatcher functionality
-            public static bool Prefix(ref bool __result)
-            {
-                // Always return false - we handle unlimited symbols
-                __result = false;
-                return false; // Skip the original method
-            }
-        }
-        
-        // Patch for KCSG.SymbolResolver.Resolve method
-        [HarmonyPatch]
-        public static class Patch_SymbolResolver_Resolve
-        {
-            // Use Prepare to dynamically locate the method to patch
-            public static bool Prepare()
-            {
-                return AccessTools.Method("KCSG.SymbolResolver:Resolve") != null;
-            }
-            
-            // Use TargetMethod to specify the method to patch
-            public static MethodBase TargetMethod()
-            {
-                return AccessTools.Method("KCSG.SymbolResolver:Resolve");
-            }
-            
-            // Prefix method that mirrors the prepatcher functionality
-            public static bool Prefix(string symbol, ResolveParams rp, ref bool __result)
-            {
-                // Try to resolve using our unlimited registry first
-                if (SymbolRegistry.TryResolve(symbol, rp))
-                {
-                    __result = true;
-                    return false; // Skip the original method
-                }
-                
-                // Let the original method handle it
-                return true;
-            }
-        }
-        
-        // Patch for RimWorld 1.5's GlobalSettings.TryResolveSymbol method if present
+        /// <summary>
+        /// Patches GlobalSettings.TryResolveSymbol to use our unlimited symbol registry
+        /// Instead of directly patching the abstract Resolve method, we patch the method that calls it
+        /// </summary>
         [HarmonyPatch]
         public static class Patch_GlobalSettings_TryResolveSymbol
         {
-            // Use Prepare to dynamically locate the method to patch
-            public static bool Prepare()
-            {
-                return AccessTools.Method("RimWorld.BaseGen.GlobalSettings:TryResolveSymbol") != null;
-            }
-            
-            // Use TargetMethod to specify the method to patch
+            // Dynamically find the method to patch since it might have different names
             public static MethodBase TargetMethod()
             {
-                return AccessTools.Method("RimWorld.BaseGen.GlobalSettings:TryResolveSymbol");
-            }
-            
-            // Prefix method that mirrors the prepatcher functionality
-            public static bool Prefix(string symbol, ResolveParams rp, ref bool __result)
-            {
-                // Try to resolve using our unlimited registry first
-                if (SymbolRegistry.TryResolve(symbol, rp))
-                {
-                    __result = true;
-                    return false; // Skip the original method
-                }
-                
-                // Let the original method handle it
-                return true;
-            }
-        }
-        
-        // Patch for DefDatabase<SymbolDef>.Add method
-        // This patch intercepts symbol def registrations to handle the 65,535 limit
-        [HarmonyPatch]
-        public static class Patch_DefDatabase_Add_SymbolDef
-        {
-            // Use Prepare to dynamically locate the method to patch
-            public static bool Prepare()
-            {
-                // First try to find the SymbolDef type
-                Type symbolDefType = AccessTools.TypeByName("KCSG.SymbolDef");
-                if (symbolDefType == null)
-                {
-                    Log.Warning("[KCSG Unbound] Could not find SymbolDef type, skipping DefDatabase patch");
-                    return false;
-                }
-                
-                // Then try to find the generic method
-                Type defDatabaseType = typeof(DefDatabase<>).MakeGenericType(symbolDefType);
-                return AccessTools.Method(defDatabaseType, "Add") != null;
-            }
-            
-            // Use TargetMethod to specify the method to patch
-            public static MethodBase TargetMethod()
-            {
-                Type symbolDefType = AccessTools.TypeByName("KCSG.SymbolDef");
-                Type defDatabaseType = typeof(DefDatabase<>).MakeGenericType(symbolDefType);
-                return AccessTools.Method(defDatabaseType, "Add");
-            }
-            
-            // Prefix method to intercept DefDatabase.Add calls for SymbolDef
-            public static void Prefix(object __0)
-            {
-                if (__0 == null) return;
-                
                 try
                 {
-                    // Get the defName from the def
-                    PropertyInfo defNameProperty = __0.GetType().GetProperty("defName");
-                    if (defNameProperty != null)
+                    // First check for RimWorld's standard method
+                    var method = typeof(GlobalSettings).GetMethod("TryResolveSymbol", 
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    
+                    if (method != null)
                     {
-                        string defName = defNameProperty.GetValue(__0) as string;
-                        if (!string.IsNullOrEmpty(defName))
+                        Log.Message("[KCSG Unbound] Found method GlobalSettings.TryResolveSymbol");
+                        return method;
+                    }
+                    
+                    // Try alternative names for the method that might exist in different versions
+                    string[] possibleMethodNames = new[] { 
+                        "ResolveSymbol", "Resolve", "TryResolve", "DoResolve", 
+                        "ResolveSymbolMethod", "TrySymbolResolve" 
+                    };
+                    
+                    foreach (var methodName in possibleMethodNames)
+                    {
+                        method = typeof(GlobalSettings).GetMethod(methodName, 
+                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            
+                        if (method != null && 
+                            method.GetParameters().Length >= 1 && 
+                            method.GetParameters()[0].ParameterType == typeof(string))
                         {
-                            // Register the def in our custom registry
-                            SymbolRegistry.RegisterDef(defName, __0);
+                            Log.Message($"[KCSG Unbound] Found alternative symbol resolution method: {methodName}");
+                            return method;
                         }
+                    }
+                    
+                    Log.Warning("[KCSG Unbound] Could not find any suitable resolution method in GlobalSettings");
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG Unbound] Error finding method to patch: {ex}");
+                    return null;
+                }
+            }
+            
+            // Prefix for the resolution method - different parameter names to handle various method signatures
+            public static bool Prefix(string ___symbol, string symbol, ResolveParams rp, ref bool __result)
+            {
+                try
+                {
+                    // Use whichever parameter is not null (handles different parameter names)
+                    string symbolToUse = symbol ?? ___symbol;
+                    
+                    if (string.IsNullOrEmpty(symbolToUse))
+                        return true; // Continue with original method if no symbol
+                        
+                    // Try to resolve using our registry
+                    if (SymbolRegistry.TryResolve(symbolToUse, rp))
+                    {
+                        __result = true;
+                        return false; // Skip original method
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"[KCSG Unbound] Error in Patch_DefDatabase_Add_SymbolDef: {ex}");
-                }
-            }
-        }
-        
-        // Patch for DefDatabase<SymbolDef>.GetNamed method
-        // This patch intercepts GetNamed calls to also check our unlimited registry
-        [HarmonyPatch]
-        public static class Patch_DefDatabase_GetNamed_SymbolDef
-        {
-            // Use Prepare to dynamically locate the method to patch
-            public static bool Prepare()
-            {
-                // First try to find the SymbolDef type
-                Type symbolDefType = AccessTools.TypeByName("KCSG.SymbolDef");
-                if (symbolDefType == null)
-                {
-                    Log.Warning("[KCSG Unbound] Could not find SymbolDef type, skipping DefDatabase.GetNamed patch");
-                    return false;
+                    Log.Error($"[KCSG Unbound] Error in resolution method prefix: {ex}");
                 }
                 
-                // Then try to find the generic method
-                Type defDatabaseType = typeof(DefDatabase<>).MakeGenericType(symbolDefType);
-                return AccessTools.Method(defDatabaseType, "GetNamed", new Type[] { typeof(string), typeof(bool) }) != null;
+                return true; // Continue with original method
             }
-            
-            // Use TargetMethod to specify the method to patch
-            public static MethodBase TargetMethod()
+        }
+
+        /// <summary>
+        /// Patches BaseGen to intercept symbol resolution through a transpiler
+        /// This will work even if we can't find the standard resolution methods
+        /// </summary>
+        [HarmonyPatch(typeof(BaseGen), "Generate")]
+        public static class Patch_BaseGen_Generate
+        {
+            public static void Prefix()
             {
-                Type symbolDefType = AccessTools.TypeByName("KCSG.SymbolDef");
-                Type defDatabaseType = typeof(DefDatabase<>).MakeGenericType(symbolDefType);
-                return AccessTools.Method(defDatabaseType, "GetNamed", new Type[] { typeof(string), typeof(bool) });
-            }
-            
-            // Postfix method to check our registry if vanilla database doesn't have the def
-            public static void Postfix(string defName, bool errorOnFail, ref object __result)
-            {
-                // If vanilla DefDatabase returned null, check our registry
-                if (__result == null && !string.IsNullOrEmpty(defName))
+                try
                 {
-                    object symbolDef;
-                    if (SymbolRegistry.TryGetDef(defName, out symbolDef))
+                    // Ensure registry is initialized before generation starts
+                    if (!SymbolRegistry.Initialized)
                     {
-                        __result = symbolDef;
+                        SymbolRegistry.Initialize();
                     }
-                    else if (errorOnFail)
-                    {
-                        // If still not found and errorOnFail is true, log a custom error
-                        Log.Error($"[KCSG Unbound] Failed to find SymbolDef named '{defName}' in either vanilla database or extended registry");
-                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG Unbound] Error in Patch_BaseGen_Generate.Prefix: {ex}");
                 }
             }
         }
-        
-        // Patch for DefDatabase<SymbolDef>.GetByShortHash method
-        // This patch intercepts GetByShortHash calls to handle unlimited symbols
-        [HarmonyPatch]
-        public static class Patch_DefDatabase_GetByShortHash_SymbolDef
+
+        /// <summary>
+        /// Patches SymbolResolver's constructor to ensure any symbol param is registered
+        /// This patch works on the concrete constructor, not an abstract method
+        /// </summary>
+        [HarmonyPatch(typeof(RimWorld.BaseGen.SymbolResolver), MethodType.Constructor)]
+        public static class Patch_SymbolResolver_Constructor
         {
-            // Store known short hash to defName mappings
-            private static Dictionary<ushort, string> hashToDefName = new Dictionary<ushort, string>();
-            
-            // Reverse lookup for faster performance
-            private static Dictionary<string, ushort> defNameToHash = new Dictionary<string, ushort>();
-            
-            // Flag to track if we've initialized our hash cache
-            private static bool hashCacheInitialized = false;
-            
-            // Cache the hash method once we find it
-            private static MethodInfo shortHashMethod = null;
-            
-            // Get the hash method using reflection
-            private static ushort CalculateShortHash(string text)
+            public static void Postfix(RimWorld.BaseGen.SymbolResolver __instance)
             {
-                // Initialize method if not done already
-                if (shortHashMethod == null)
+                try
                 {
-                    Type shortHashGiverType = typeof(ShortHashGiver);
-                    
-                    // Try different possible method names
-                    string[] possibleMethodNames = new string[] { "GetShortHash", "GiveShortHash", "GiveShortHashString", "GetHashForString" };
-                    
-                    foreach (string methodName in possibleMethodNames)
+                    // Ensure registry is initialized
+                    if (!SymbolRegistry.Initialized)
                     {
-                        shortHashMethod = shortHashGiverType.GetMethod(methodName, 
-                            BindingFlags.Public | BindingFlags.Static, 
-                            null, 
-                            new Type[] { typeof(string) }, 
-                            null);
-                        
-                        if (shortHashMethod != null && shortHashMethod.ReturnType == typeof(ushort))
+                        SymbolRegistry.Initialize();
+                    }
+                    
+                    // Get the resolver type and register it if it has a resolverSymbol field/property
+                    Type resolverType = __instance.GetType();
+                    FieldInfo symbolField = resolverType.GetField("symbol", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    
+                    if (symbolField != null && symbolField.GetValue(__instance) is string symbol && !string.IsNullOrEmpty(symbol))
+                    {
+                        SymbolRegistry.Register(symbol, resolverType);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG Unbound] Error in Patch_SymbolResolver_Constructor.Postfix: {ex}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Fix for the ambiguous match for DefDatabase.Add<SymbolDef>
+        /// Uses a more specific targeting approach to avoid conflicts
+        /// </summary>
+        public static class Patch_DefDatabase_Add_SymbolDef
+        {
+            // Track if the patch has been applied
+            private static bool patched = false;
+            
+            // Cache for registered def short hashes
+            private static Dictionary<ushort, string> shortHashToDefName = new Dictionary<ushort, string>();
+            
+            /// <summary>
+            /// Called by Harmony to determine if this patch should be applied
+            /// </summary>
+            public static bool Prepare()
+            {
+                try
+                {
+                    if (patched) return false;
+                    
+                    // Get the generic type definition
+                    Type defDatabaseType = typeof(DefDatabase<>).GetGenericTypeDefinition();
+                    
+                    // Find the KCSG.SymbolDef type dynamically to avoid direct dependencies
+                    Type symbolDefType = null;
+                    foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        try 
                         {
-                            Log.Message($"[KCSG Unbound] Found hash method: {methodName}");
+                            foreach (var type in assembly.GetTypes())
+                            {
+                                if (type.FullName == "KCSG.SymbolDef" || type.Name == "SymbolDef" && type.Namespace == "KCSG")
+                                {
+                                    symbolDefType = type;
+                                    break;
+                                }
+                            }
+                            if (symbolDefType != null) break;
+                        }
+                        catch (Exception) { continue; } // Skip assemblies that can't be reflected
+                    }
+                    
+                    if (symbolDefType == null)
+                    {
+                        Log.Warning("[KCSG Unbound] Could not find KCSG.SymbolDef type - using fallback");
+                        // Try using Def as a base type if we can't find the exact SymbolDef
+                        symbolDefType = typeof(Def);
+                    }
+                    
+                    // Create the closed generic type
+                    Type closedDefDatabaseType = defDatabaseType.MakeGenericType(symbolDefType);
+                    
+                    // Get the Add method with parameter constraints to avoid ambiguity
+                    MethodInfo addMethod = null;
+                    
+                    foreach (var method in closedDefDatabaseType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                    {
+                        if (method.Name == "Add" && 
+                            method.GetParameters().Length == 1 && 
+                            method.GetParameters()[0].ParameterType == symbolDefType)
+                        {
+                            addMethod = method;
                             break;
                         }
                     }
                     
-                    // If still not found, try to find any method that takes a string and returns ushort
-                    if (shortHashMethod == null)
+                    if (addMethod == null)
                     {
-                        foreach (MethodInfo method in shortHashGiverType.GetMethods(BindingFlags.Public | BindingFlags.Static))
-                        {
-                            if (method.ReturnType == typeof(ushort) && 
-                                method.GetParameters().Length == 1 && 
-                                method.GetParameters()[0].ParameterType == typeof(string))
-                            {
-                                shortHashMethod = method;
-                                Log.Message($"[KCSG Unbound] Found fallback hash method: {method.Name}");
-                                break;
-                            }
-                        }
+                        Log.Error("[KCSG Unbound] Could not find DefDatabase.Add method for patching");
+                        return false;
                     }
                     
-                    // Last resort - try to create a hash manually
-                    if (shortHashMethod == null)
+                    // Get a reference to our static Prefix method
+                    MethodInfo prefixMethod = typeof(Patch_DefDatabase_Add_SymbolDef).GetMethod(
+                        "PrefixAdd", 
+                        BindingFlags.Static | BindingFlags.NonPublic);
+                    
+                    if (prefixMethod == null)
                     {
-                        Log.Error("[KCSG Unbound] Could not find a suitable hash method, using simple hash fallback");
-                        return (ushort)(text.GetHashCode() & 0xFFFF);
+                        Log.Error("[KCSG Unbound] Could not find prefix method for patching");
+                        return false;
                     }
-                }
-                
-                // Invoke the found method
-                try
-                {
-                    return (ushort)shortHashMethod.Invoke(null, new object[] { text });
+                    
+                    // Create a dynamic harmony patch
+                    var harmony = new Harmony("com.kcsg.unbound.defdb");
+                    harmony.Patch(addMethod, 
+                        prefix: new HarmonyMethod(prefixMethod));
+                    
+                    Log.Message("[KCSG Unbound] Successfully applied Patch_DefDatabase_Add_SymbolDef");
+                    patched = true;
+                    return true;
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"[KCSG Unbound] Error calculating hash for '{text}': {ex}");
-                    return (ushort)(text.GetHashCode() & 0xFFFF);
-                }
-            }
-            
-            // Use Prepare to dynamically locate the method to patch
-            public static bool Prepare()
-            {
-                // First try to find the SymbolDef type
-                Type symbolDefType = AccessTools.TypeByName("KCSG.SymbolDef");
-                if (symbolDefType == null)
-                {
-                    Log.Warning("[KCSG Unbound] Could not find SymbolDef type, skipping DefDatabase.GetByShortHash patch");
+                    Log.Error($"[KCSG Unbound] Error in Patch_DefDatabase_Add_SymbolDef.Prepare: {ex}");
                     return false;
                 }
-                
-                // Then try to find the generic method
-                Type defDatabaseType = typeof(DefDatabase<>).MakeGenericType(symbolDefType);
-                return AccessTools.Method(defDatabaseType, "GetByShortHash") != null;
             }
             
-            // Use TargetMethod to specify the method to patch
-            public static MethodBase TargetMethod()
+            /// <summary>
+            /// Prefix method for DefDatabase.Add<SymbolDef>
+            /// </summary>
+            private static bool PrefixAdd(object __0)
             {
-                Type symbolDefType = AccessTools.TypeByName("KCSG.SymbolDef");
-                Type defDatabaseType = typeof(DefDatabase<>).MakeGenericType(symbolDefType);
-                return AccessTools.Method(defDatabaseType, "GetByShortHash");
-            }
-            
-            // Initialize hash cache to avoid repeated hash calculations
-            private static void EnsureHashCache()
-            {
-                if (hashCacheInitialized) return;
-                
                 try
                 {
-                    hashToDefName.Clear();
-                    defNameToHash.Clear();
-                    
-                    // Pre-compute hashes for all registered def names
-                    foreach (string defName in SymbolRegistry.AllRegisteredDefNames)
+                    // Ensure registry is initialized
+                    if (!SymbolRegistry.Initialized)
                     {
-                        if (string.IsNullOrEmpty(defName)) continue;
-                        
-                        ushort hash = CalculateShortHash(defName);
-                        hashToDefName[hash] = defName;
-                        defNameToHash[defName] = hash;
+                        SymbolRegistry.Initialize();
                     }
                     
-                    hashCacheInitialized = true;
-                    Log.Message($"[KCSG Unbound] Hash cache initialized with {hashToDefName.Count} entries");
+                    if (__0 is Def def)
+                    {
+                        string defName = def.defName;
+                        
+                        // Register with our shadow registry
+                        SymbolRegistry.RegisterDef(defName, def);
+                        
+                        // Calculate and register short hash
+                        RegisterDefHash(defName);
+                        
+                        // Continue with original method
+                        return true;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"[KCSG Unbound] Error initializing hash cache: {ex}");
+                    Log.Error($"[KCSG Unbound] Error in DefDatabase.Add<SymbolDef> prefix: {ex}");
                 }
+                return true;
             }
             
-            // Method to update hash cache when new defs are registered
+            /// <summary>
+            /// Registers a def name with its hash for fast lookup
+            /// </summary>
             public static void RegisterDefHash(string defName)
             {
                 if (string.IsNullOrEmpty(defName)) return;
                 
+                // Calculate short hash (same algorithm as RimWorld)
+                ushort shortHash = 0;
+                for (int i = 0; i < defName.Length; i++)
+                {
+                    shortHash = (ushort)((shortHash << 5) - shortHash + defName[i]);
+                }
+                
+                // Register in our cache
+                shortHashToDefName[shortHash] = defName;
+            }
+            
+            /// <summary>
+            /// Clears the short hash cache
+            /// </summary>
+            public static void ClearHashCache()
+            {
+                shortHashToDefName.Clear();
+            }
+            
+            /// <summary>
+            /// Attempts to get a def name by its short hash
+            /// </summary>
+            public static bool TryGetDefNameByHash(ushort shortHash, out string defName)
+            {
+                return shortHashToDefName.TryGetValue(shortHash, out defName);
+            }
+        }
+        
+        /// <summary>
+        /// Patch for DefDatabase.GetByShortHash to use our registry
+        /// </summary>
+        [HarmonyPatch]
+        public static class Patch_DefDatabase_GetByShortHash_SymbolDef
+        {
+            /// <summary>
+            /// Dynamically determine the method to patch
+            /// </summary>
+            public static MethodBase TargetMethod()
+            {
                 try
                 {
-                    ushort hash = CalculateShortHash(defName);
-                    hashToDefName[hash] = defName;
-                    defNameToHash[defName] = hash;
+                    // Find the KCSG.SymbolDef type
+                    Type symbolDefType = null;
+                    foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        try 
+                        {
+                            foreach (var type in assembly.GetTypes())
+                            {
+                                if (type.FullName == "KCSG.SymbolDef" || type.Name == "SymbolDef" && type.Namespace == "KCSG")
+                                {
+                                    symbolDefType = type;
+                                    break;
+                                }
+                            }
+                            if (symbolDefType != null) break;
+                        }
+                        catch (Exception) { continue; }
+                    }
+                    
+                    if (symbolDefType == null)
+                    {
+                        // Fallback to Def if needed
+                        symbolDefType = typeof(Def);
+                    }
+                    
+                    // Create the closed generic type
+                    Type defDatabaseType = typeof(DefDatabase<>).MakeGenericType(symbolDefType);
+                    
+                    // Get the GetByShortHash method
+                    return defDatabaseType.GetMethod("GetByShortHash", 
+                        BindingFlags.Public | BindingFlags.Static, 
+                        null, 
+                        new[] { typeof(ushort) }, 
+                        null);
                 }
                 catch (Exception ex)
                 {
-                    Log.Warning($"[KCSG Unbound] Error registering hash for def '{defName}': {ex}");
+                    Log.Error($"[KCSG Unbound] Error in Patch_DefDatabase_GetByShortHash_SymbolDef.TargetMethod: {ex}");
+                    return null;
                 }
             }
             
-            // Clear cache if needed (for testing or debugging)
-            public static void ClearHashCache()
+            /// <summary>
+            /// Prefix for GetByShortHash to intercept calls and use our shadow registry
+            /// </summary>
+            public static bool Prefix(ushort shortHash, ref object __result)
             {
-                hashToDefName.Clear();
-                defNameToHash.Clear();
-                hashCacheInitialized = false;
-            }
-            
-            // Postfix method to check our registry if vanilla database doesn't have the def
-            public static void Postfix(ushort shortHash, ref object __result)
-            {
-                // If vanilla DefDatabase returned null, check our registry
-                if (__result != null) return;
-                
-                // Ensure hash cache is initialized
-                EnsureHashCache();
-                
-                // Fast lookup using our pre-computed hash cache
-                string defName;
-                if (hashToDefName.TryGetValue(shortHash, out defName))
+                try
                 {
-                    // We know this hash, try to get the def from our registry
-                    object symbolDef;
-                    if (SymbolRegistry.TryGetDef(defName, out symbolDef))
+                    string defName;
+                    if (Patch_DefDatabase_Add_SymbolDef.TryGetDefNameByHash(shortHash, out defName))
                     {
-                        __result = symbolDef;
+                        // Try to get from our shadow registry
+                        object symbolDef;
+                        if (SymbolRegistry.TryGetDef(defName, out symbolDef))
+                        {
+                            __result = symbolDef;
+                            return false; // Skip original method
+                        }
                     }
                 }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG Unbound] Error in GetByShortHash prefix: {ex}");
+                }
+                return true; // Continue with original method
             }
         }
     }
