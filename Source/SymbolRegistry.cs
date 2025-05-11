@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using RimWorld;
 using RimWorld.BaseGen;
 using Verse;
+using System.Reflection;
 
 namespace KCSG
 {
@@ -13,38 +14,68 @@ namespace KCSG
     public static class SymbolRegistry
     {
         // Dictionary to store all registered symbols and their resolvers
-        private static Dictionary<string, Type> symbolResolvers = new Dictionary<string, Type>();
+        private static Dictionary<string, Type> symbolResolvers = new Dictionary<string, Type>(4096);
         
         // Dictionary to store symbol defs by name - bypassing the 65,535 limit
         // Using a generic type parameter for better type safety
-        private static Dictionary<string, object> symbolDefs = new Dictionary<string, object>();
+        private static Dictionary<string, object> symbolDefs = new Dictionary<string, object>(8192);
         
         // Store hash to def name mappings for quick lookups
-        private static Dictionary<ushort, string> shortHashToDefName = new Dictionary<ushort, string>();
+        private static Dictionary<ushort, string> shortHashToDefName = new Dictionary<ushort, string>(8192);
         
         // Store def name to hash mappings for quick generation
-        private static Dictionary<string, ushort> defNameToShortHash = new Dictionary<string, ushort>();
+        private static Dictionary<string, ushort> defNameToShortHash = new Dictionary<string, ushort>(8192);
         
         // Track if we've been initialized - changed from property to field for prepatcher compatibility
         public static bool Initialized = false;
+        
+        // Safeguard against bad initialization
+        private static bool dictInitError = false;
 
         /// <summary>
         /// Initializes the symbol registry, clearing any existing registrations
         /// </summary>
         public static void Initialize()
         {
-            Log.Message("[KCSG] Initializing SymbolRegistry for unlimited symbols");
-            symbolResolvers.Clear();
-            symbolDefs.Clear();
-            shortHashToDefName.Clear();
-            defNameToShortHash.Clear();
-            Initialized = true;
-            
-            // Also clear hash cache
-            // Remove references to classes that don't exist yet
-            
-            // Try to synchronize with RimWorld's native resolver system if available
-            SynchronizeWithNative();
+            try
+            {
+                Log.Message("[KCSG] Initializing SymbolRegistry for unlimited symbols");
+                
+                // Initialize with initial capacities to avoid excessive resizing
+                symbolResolvers = new Dictionary<string, Type>(4096);
+                symbolDefs = new Dictionary<string, object>(8192);
+                shortHashToDefName = new Dictionary<ushort, string>(8192);
+                defNameToShortHash = new Dictionary<string, ushort>(8192);
+                
+                Initialized = true;
+                dictInitError = false;
+                
+                // Try to synchronize with RimWorld's native resolver system if available
+                SynchronizeWithNative();
+                
+                Log.Message("[KCSG] SymbolRegistry initialized successfully with pre-allocated dictionaries");
+            }
+            catch (Exception ex)
+            {
+                dictInitError = true;
+                Log.Error($"[KCSG] Error initializing SymbolRegistry: {ex}");
+                
+                // Fallback initialization with smaller capacity
+                try
+                {
+                    Log.Warning("[KCSG] Attempting fallback initialization with smaller dictionaries");
+                    symbolResolvers = new Dictionary<string, Type>(1024);
+                    symbolDefs = new Dictionary<string, object>(1024);
+                    shortHashToDefName = new Dictionary<ushort, string>(1024);
+                    defNameToShortHash = new Dictionary<string, ushort>(1024);
+                    Initialized = true;
+                }
+                catch (Exception fallbackEx)
+                {
+                    Log.Error($"[KCSG] Critical error in fallback initialization: {fallbackEx}");
+                    Initialized = false;
+                }
+            }
         }
         
         /// <summary>
@@ -54,33 +85,12 @@ namespace KCSG
         {
             try
             {
-                // Use the compatibility layer to find and access RimWorld's native symbols
-                Dictionary<string, Type> nativeResolvers = RimWorldCompatibility.GetSymbolResolvers();
-                
-                if (nativeResolvers != null && nativeResolvers.Count > 0)
-                {
-                    Log.Message($"[KCSG] Synchronizing with {nativeResolvers.Count} native symbol resolvers");
-                    
-                    // Copy all native resolvers to our registry for compatibility
-                    foreach (var pair in nativeResolvers)
-                    {
-                        if (!symbolResolvers.ContainsKey(pair.Key))
-                        {
-                            symbolResolvers[pair.Key] = pair.Value;
-                            Log.Message($"[KCSG] Imported native resolver: {pair.Key} -> {pair.Value.Name}");
-                        }
-                    }
-                    
-                    Log.Message("[KCSG] Successfully synchronized with native symbol system");
-                }
-                else
-                {
-                    Log.Message("[KCSG] No native symbol resolvers found for synchronization - running in standalone mode");
-                }
+                // Use the new RimWorldCompatibility method to sync registries
+                RimWorldCompatibility.SyncRegistries();
             }
             catch (Exception ex)
             {
-                Log.Error($"[KCSG] Error synchronizing with native resolvers: {ex}");
+                Log.Error($"[KCSG] Error synchronizing with native symbol registry: {ex}");
             }
         }
 
@@ -110,16 +120,21 @@ namespace KCSG
                 return;
             }
 
-            // Register or replace existing registration
-            if (symbolResolvers.ContainsKey(symbol))
+            try
             {
-                Log.Warning($"[KCSG] Replacing existing registration for symbol '{symbol}': {symbolResolvers[symbol].Name} -> {resolverType.Name}");
-                symbolResolvers[symbol] = resolverType;
+                // Register or replace existing registration
+                if (symbolResolvers.ContainsKey(symbol))
+                {
+                    symbolResolvers[symbol] = resolverType;
+                }
+                else
+                {
+                    symbolResolvers.Add(symbol, resolverType);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                symbolResolvers.Add(symbol, resolverType);
-                Log.Message($"[KCSG] Registered symbol '{symbol}' with resolver {resolverType.Name}");
+                Log.Error($"[KCSG] Error registering symbol '{symbol}': {ex}");
             }
         }
         
@@ -132,47 +147,55 @@ namespace KCSG
         {
             if (string.IsNullOrEmpty(defName))
             {
-                Log.Error("[KCSG] Attempted to register null or empty SymbolDef");
                 return;
             }
 
             if (symbolDef == null)
             {
-                Log.Error($"[KCSG] Attempted to register SymbolDef '{defName}' with null def");
                 return;
+            }
+            
+            // If we had initialization issues, try to reinitialize
+            if (dictInitError && symbolDefs.Count == 0)
+            {
+                Initialize();
             }
 
             try
             {
+                // Compute short hash first to avoid unnecessary work if it fails
+                ushort shortHash = CalculateShortHash(defName);
+                
                 // Register or replace existing registration
                 if (symbolDefs.ContainsKey(defName))
                 {
-                    Log.Warning($"[KCSG] Replacing existing SymbolDef registration for '{defName}'");
+                    Log.Message($"[KCSG] Replacing existing SymbolDef registration for '{defName}'");
                     symbolDefs[defName] = symbolDef;
                 }
                 else
                 {
+                    // Add to the defs dictionary
                     symbolDefs.Add(defName, symbolDef);
                     
-                    // Compute and store short hash for fast lookup
+                    // Store hash mappings
                     if (!defNameToShortHash.ContainsKey(defName))
                     {
-                        ushort shortHash = CalculateShortHash(defName);
                         defNameToShortHash[defName] = shortHash;
-                        shortHashToDefName[shortHash] = defName;
                     }
                     
-                    // Register hash directly with our local cache - no need for extra calls
-                    
-                    if (RegisteredDefCount % 1000 == 0)
+                    if (!shortHashToDefName.ContainsKey(shortHash))
                     {
-                        Log.Message($"[KCSG] Registered {RegisteredDefCount} SymbolDefs so far");
+                        shortHashToDefName[shortHash] = defName;
                     }
                 }
             }
             catch (Exception ex)
             {
-                Log.Error($"[KCSG] Error registering def '{defName}': {ex}");
+                // Log less frequently to avoid log spam
+                if (symbolDefs.Count % 1000 == 0 || symbolDefs.Count < 100)
+                {
+                    Log.Error($"[KCSG] Error registering def '{defName}': {ex}");
+                }
             }
         }
         
@@ -216,6 +239,12 @@ namespace KCSG
         /// <returns>True if the def was found, false otherwise</returns>
         public static bool TryGetDef(string defName, out object symbolDef)
         {
+            if (string.IsNullOrEmpty(defName))
+            {
+                symbolDef = null;
+                return false;
+            }
+            
             return symbolDefs.TryGetValue(defName, out symbolDef);
         }
         
@@ -246,37 +275,43 @@ namespace KCSG
         /// <returns>True if the symbol was resolved, false otherwise</returns>
         public static bool TryResolve(string symbol, ResolveParams rp)
         {
-            if (string.IsNullOrEmpty(symbol))
+            // Always check initialization first
+            if (!Initialized)
             {
-                return false;
+                Initialize();
             }
 
+            // First try using our shadow registry
+            if (symbolResolvers.TryGetValue(symbol, out Type symbolResolverType))
+            {
+                try
+                {
+                    // We have this symbol, try to create and use the resolver
+                    object resolver = Activator.CreateInstance(symbolResolverType);
+                    
+                    // Invoke the Resolve method with reflection
+                    MethodInfo resolveMethod = symbolResolverType.GetMethod("Resolve", 
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    
+                    if (resolveMethod != null)
+                    {
+                        resolveMethod.Invoke(resolver, new object[] { rp });
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG] Error resolving symbol '{symbol}' from shadow registry: {ex}");
+                }
+            }
+
+            // If we failed or don't have this symbol, try native resolution as fallback
             try
             {
-                // First try using the native RimWorld resolver method if available
-                if (RimWorldCompatibility.TryNativeResolve(symbol, rp))
-                {
-                    return true;
-                }
-                
-                // If no native resolution or it failed, use our custom registry
-                if (!symbolResolvers.ContainsKey(symbol))
-                {
-                    return false;
-                }
-
-                // Create an instance of the resolver
-                RimWorld.BaseGen.SymbolResolver resolver = (RimWorld.BaseGen.SymbolResolver)Activator.CreateInstance(symbolResolvers[symbol]);
-                if (resolver != null)
-                {
-                    resolver.Resolve(rp);
-                    return true;
-                }
-                return false;
+                return RimWorldCompatibility.TryResolveWithNative(symbol, rp);
             }
-            catch (Exception ex)
+            catch
             {
-                Log.Error($"[KCSG] Error resolving symbol '{symbol}': {ex}");
                 return false;
             }
         }
@@ -341,6 +376,17 @@ namespace KCSG
         public static string GetStatusReport()
         {
             return $"KCSG SymbolRegistry: {RegisteredSymbolCount} symbols and {RegisteredDefCount} defs registered";
+        }
+
+        /// <summary>
+        /// Checks if a symbol has a registered resolver
+        /// </summary>
+        public static bool HasResolver(string symbol)
+        {
+            if (string.IsNullOrEmpty(symbol))
+                return false;
+                
+            return symbolResolvers.ContainsKey(symbol);
         }
     }
 } 

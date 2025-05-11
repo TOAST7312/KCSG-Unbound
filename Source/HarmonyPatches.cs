@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Linq;
 using HarmonyLib;
 using RimWorld;
 using RimWorld.BaseGen;
@@ -14,57 +15,218 @@ namespace KCSG
     public static class HarmonyPatches
     {
         /// <summary>
-        /// Patches GlobalSettings.TryResolveSymbol to use our unlimited symbol registry
-        /// Instead of directly patching the abstract Resolve method, we patch the method that calls it
+        /// Apply all patches using a safe approach that won't crash if methods aren't found
         /// </summary>
-        [HarmonyPatch]
-        public static class Patch_GlobalSettings_TryResolveSymbol
+        public static void ApplyPatches(Harmony harmony)
         {
-            // Dynamically find the method to patch since it might have different names
-            public static MethodBase TargetMethod()
+            try
             {
-                try
+                Log.Message("[KCSG Unbound] Applying Harmony patches using safe approach");
+                
+                // Try to find the GlobalSettings symbol resolution method first
+                var symbolResolutionMethod = FindSymbolResolutionMethod();
+                if (symbolResolutionMethod != null)
                 {
-                    // First check for RimWorld's standard method
-                    var method = typeof(GlobalSettings).GetMethod("TryResolveSymbol", 
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    // Get our prefix method
+                    var prefix = typeof(Patch_GlobalSettings_TryResolveSymbol)
+                        .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
                     
-                    if (method != null)
+                    if (prefix != null)
                     {
-                        Log.Message("[KCSG Unbound] Found method GlobalSettings.TryResolveSymbol");
-                        return method;
+                        Log.Message($"[KCSG Unbound] Found resolution method, patching: {symbolResolutionMethod.DeclaringType.Name}.{symbolResolutionMethod.Name}");
+                        harmony.Patch(symbolResolutionMethod, prefix: new HarmonyMethod(prefix));
                     }
+                }
+                else
+                {
+                    Log.Warning("[KCSG Unbound] Couldn't find resolution method, using alternative patching approach");
                     
-                    // Try alternative names for the method that might exist in different versions
-                    string[] possibleMethodNames = new[] { 
-                        "ResolveSymbol", "Resolve", "TryResolve", "DoResolve", 
-                        "ResolveSymbolMethod", "TrySymbolResolve" 
-                    };
-                    
-                    foreach (var methodName in possibleMethodNames)
+                    // Apply alternative patches that don't depend on the exact method
+                    ApplyAlternativePatches(harmony);
+                }
+                
+                // Always patch these generic methods that don't rely on specific RimWorld API methods
+                Log.Message("[KCSG Unbound] Applying generic patches");
+                // Use direct patching instead of PatchAll
+                foreach (var method in typeof(Patch_BaseGen_Generate).GetMethods(BindingFlags.Static | BindingFlags.Public))
+                {
+                    if (method.Name == "Prefix" || method.Name == "Postfix")
                     {
-                        method = typeof(GlobalSettings).GetMethod(methodName, 
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            
-                        if (method != null && 
-                            method.GetParameters().Length >= 1 && 
-                            method.GetParameters()[0].ParameterType == typeof(string))
+                        var patchMethod = new HarmonyMethod(method);
+                        var targetMethod = AccessTools.Method(typeof(BaseGen), "Generate");
+                        if (targetMethod != null)
                         {
-                            Log.Message($"[KCSG Unbound] Found alternative symbol resolution method: {methodName}");
-                            return method;
+                            harmony.Patch(targetMethod, 
+                                prefix: method.Name == "Prefix" ? patchMethod : null, 
+                                postfix: method.Name == "Postfix" ? patchMethod : null);
                         }
                     }
-                    
-                    Log.Warning("[KCSG Unbound] Could not find any suitable resolution method in GlobalSettings");
-                    return null;
                 }
-                catch (Exception ex)
+                
+                // Directly patch the constructor
+                var ctorInfo = AccessTools.Constructor(typeof(SymbolResolver));
+                if (ctorInfo != null)
                 {
-                    Log.Error($"[KCSG Unbound] Error finding method to patch: {ex}");
-                    return null;
+                    var postfixMethod = typeof(Patch_SymbolResolver_Constructor)
+                        .GetMethod("Postfix", BindingFlags.Static | BindingFlags.Public);
+                    if (postfixMethod != null)
+                    {
+                        harmony.Patch(ctorInfo, postfix: new HarmonyMethod(postfixMethod));
+                    }
+                }
+                
+                // Apply DefDatabase specific patches
+                if (Patch_DefDatabase_Add_SymbolDef.Prepare())
+                {
+                    Log.Message("[KCSG Unbound] DefDatabase.Add patch applied");
+                }
+                
+                // Try to patch GetByShortHash if possible
+                var getByShortHashMethod = Patch_DefDatabase_GetByShortHash_SymbolDef.TargetMethod();
+                if (getByShortHashMethod != null)
+                {
+                    var getByShortHashPrefix = typeof(Patch_DefDatabase_GetByShortHash_SymbolDef)
+                        .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
+                    
+                    harmony.Patch(getByShortHashMethod, prefix: new HarmonyMethod(getByShortHashPrefix));
+                    Log.Message("[KCSG Unbound] DefDatabase.GetByShortHash patch applied");
+                }
+                
+                Log.Message("[KCSG Unbound] All patches applied successfully");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error applying patches: {ex}");
+            }
+        }
+        
+        /// <summary>
+        /// Find the symbol resolution method in RimWorld classes
+        /// </summary>
+        private static MethodInfo FindSymbolResolutionMethod()
+        {
+            try
+            {
+                // First try with GlobalSettings
+                var method = typeof(GlobalSettings).GetMethod("TryResolveSymbol", 
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                
+                if (method != null)
+                {
+                    return method;
+                }
+                
+                // Try alternative names for the method that might exist in different versions
+                string[] possibleMethodNames = new[] { 
+                    "ResolveSymbol", "Resolve", "TryResolve", "DoResolve", 
+                    "ResolveSymbolMethod", "TrySymbolResolve", "GenerateSymbol" 
+                };
+                
+                foreach (var methodName in possibleMethodNames)
+                {
+                    method = typeof(GlobalSettings).GetMethod(methodName, 
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        
+                    if (method != null && 
+                        method.GetParameters().Length >= 1 && 
+                        method.GetParameters()[0].ParameterType == typeof(string))
+                    {
+                        return method;
+                    }
+                }
+                
+                // Try looking in BaseGen class
+                foreach (var methodName in possibleMethodNames)
+                {
+                    method = typeof(BaseGen).GetMethod(methodName, 
+                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                        
+                    if (method != null && 
+                        method.GetParameters().Length >= 1 && 
+                        method.GetParameters()[0].ParameterType == typeof(string))
+                    {
+                        return method;
+                    }
+                }
+                
+                // Look for any method in BaseGen or GlobalSettings that takes a symbol string and ResolveParams
+                foreach (var type in new[] { typeof(BaseGen), typeof(GlobalSettings) })
+                {
+                    foreach (var m in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+                    {
+                        var parameters = m.GetParameters();
+                        if (parameters.Length >= 2 &&
+                            (parameters[0].ParameterType == typeof(string) && parameters[1].ParameterType == typeof(ResolveParams) ||
+                            parameters[1].ParameterType == typeof(string) && parameters[0].ParameterType == typeof(ResolveParams)))
+                        {
+                            return m;
+                        }
+                    }
+                }
+                
+                // Last resort: look for any SymbolResolver.Resolve method
+                var symbolResolverType = typeof(SymbolResolver);
+                method = symbolResolverType.GetMethod("Resolve", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (method != null)
+                {
+                    return method;
+                }
+                
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error finding symbol resolution method: {ex}");
+                return null;
+            }
+        }
+        
+        /// <summary>
+        /// Apply alternative patches that don't depend on specific method names
+        /// </summary>
+        private static void ApplyAlternativePatches(Harmony harmony)
+        {
+            try
+            {
+                // Patch ALL symbol resolver methods in the RimWorld.BaseGen namespace
+                foreach (var type in typeof(SymbolResolver).Assembly.GetTypes())
+                {
+                    if (type.Namespace == "RimWorld.BaseGen" && 
+                        (type.IsSubclassOf(typeof(SymbolResolver)) || type == typeof(SymbolResolver)))
+                    {
+                        // Look for Resolve method
+                        var resolveMethod = type.GetMethod("Resolve", 
+                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            
+                        if (resolveMethod != null && resolveMethod.GetParameters().Length > 0)
+                        {
+                            try
+                            {
+                                var prefix = typeof(Patch_Alternative_SymbolResolver_Resolve)
+                                    .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
+                                    
+                                harmony.Patch(resolveMethod, prefix: new HarmonyMethod(prefix));
+                            }
+                            catch (Exception ex)
+                            {
+                                // Skip if we can't patch this specific method
+                                Log.Warning($"[KCSG Unbound] Couldn't patch {type.Name}.Resolve: {ex.Message}");
+                            }
+                        }
+                    }
                 }
             }
-            
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error applying alternative patches: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Patches GlobalSettings.TryResolveSymbol to use our unlimited symbol registry
+        /// </summary>
+        public static class Patch_GlobalSettings_TryResolveSymbol
+        {
             // Prefix for the resolution method - different parameter names to handle various method signatures
             public static bool Prefix(string ___symbol, string symbol, ResolveParams rp, ref bool __result)
             {
@@ -91,7 +253,50 @@ namespace KCSG
                 return true; // Continue with original method
             }
         }
-
+        
+        /// <summary>
+        /// Alternative patch for all SymbolResolver.Resolve methods
+        /// </summary>
+        public static class Patch_Alternative_SymbolResolver_Resolve
+        {
+            public static bool Prefix(object __instance, ResolveParams rp)
+            {
+                try
+                {
+                    // Ensure registry is initialized
+                    if (!SymbolRegistry.Initialized)
+                    {
+                        SymbolRegistry.Initialize();
+                    }
+                    
+                    // Try to get the symbol field from the resolver instance
+                    Type resolverType = __instance.GetType();
+                    FieldInfo symbolField = resolverType.GetField("symbol", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    
+                    if (symbolField != null && symbolField.GetValue(__instance) is string symbol && !string.IsNullOrEmpty(symbol))
+                    {
+                        // Check if our registry has a resolver for this symbol
+                        if (SymbolRegistry.HasResolver(symbol))
+                        {
+                            // Let our registry try to resolve it first
+                            if (SymbolRegistry.TryResolve(symbol, rp))
+                            {
+                                // Successfully resolved with our registry, skip the original
+                                return false;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG Unbound] Error in alternative resolve patch: {ex}");
+                }
+                
+                // Continue with original method
+                return true;
+            }
+        }
+        
         /// <summary>
         /// Patches BaseGen to intercept symbol resolution through a transpiler
         /// This will work even if we can't find the standard resolution methods
@@ -158,8 +363,9 @@ namespace KCSG
             // Track if the patch has been applied
             private static bool patched = false;
             
-            // Cache for registered def short hashes
-            private static Dictionary<ushort, string> shortHashToDefName = new Dictionary<ushort, string>();
+            // Maximum error threshold to avoid overwhelming logs
+            private static int maxErrorCount = 20;
+            private static int errorCount = 0;
             
             /// <summary>
             /// Called by Harmony to determine if this patch should be applied
@@ -218,7 +424,7 @@ namespace KCSG
                     
                     if (addMethod == null)
                     {
-                        Log.Error("[KCSG Unbound] Could not find DefDatabase.Add method for patching");
+                        Log.Warning("[KCSG Unbound] Could not find DefDatabase.Add method for patching");
                         return false;
                     }
                     
@@ -229,7 +435,7 @@ namespace KCSG
                     
                     if (prefixMethod == null)
                     {
-                        Log.Error("[KCSG Unbound] Could not find prefix method for patching");
+                        Log.Warning("[KCSG Unbound] Could not find prefix method for patching");
                         return false;
                     }
                     
@@ -266,62 +472,54 @@ namespace KCSG
                     {
                         string defName = def.defName;
                         
-                        // Register with our shadow registry
-                        SymbolRegistry.RegisterDef(defName, def);
+                        if (string.IsNullOrEmpty(defName))
+                        {
+                            // Skip defs with no name
+                            return true;
+                        }
                         
-                        // Calculate and register short hash
-                        RegisterDefHash(defName);
-                        
-                        // Continue with original method
-                        return true;
+                        try
+                        {
+                            // Register with our shadow registry 
+                            SymbolRegistry.RegisterDef(defName, def);
+                            
+                            // Continue with original method
+                            return true;
+                        }
+                        catch (Exception ex)
+                        {
+                            // Limit error logging to avoid flooding
+                            if (errorCount < maxErrorCount)
+                            {
+                                errorCount++;
+                                Log.Error($"[KCSG Unbound] Error in DefDatabase.Add<SymbolDef> prefix: {ex}");
+                                
+                                if (errorCount == maxErrorCount)
+                                {
+                                    Log.Warning("[KCSG Unbound] Maximum error threshold reached, suppressing further error messages");
+                                }
+                            }
+                            
+                            // Always continue with original method even if our registration failed
+                            return true;
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"[KCSG Unbound] Error in DefDatabase.Add<SymbolDef> prefix: {ex}");
+                    if (errorCount < maxErrorCount)
+                    {
+                        errorCount++;
+                        Log.Error($"[KCSG Unbound] Critical error in DefDatabase.Add<SymbolDef> prefix: {ex}");
+                    }
                 }
                 return true;
-            }
-            
-            /// <summary>
-            /// Registers a def name with its hash for fast lookup
-            /// </summary>
-            public static void RegisterDefHash(string defName)
-            {
-                if (string.IsNullOrEmpty(defName)) return;
-                
-                // Calculate short hash (same algorithm as RimWorld)
-                ushort shortHash = 0;
-                for (int i = 0; i < defName.Length; i++)
-                {
-                    shortHash = (ushort)((shortHash << 5) - shortHash + defName[i]);
-                }
-                
-                // Register in our cache
-                shortHashToDefName[shortHash] = defName;
-            }
-            
-            /// <summary>
-            /// Clears the short hash cache
-            /// </summary>
-            public static void ClearHashCache()
-            {
-                shortHashToDefName.Clear();
-            }
-            
-            /// <summary>
-            /// Attempts to get a def name by its short hash
-            /// </summary>
-            public static bool TryGetDefNameByHash(ushort shortHash, out string defName)
-            {
-                return shortHashToDefName.TryGetValue(shortHash, out defName);
             }
         }
         
         /// <summary>
         /// Patch for DefDatabase.GetByShortHash to use our registry
         /// </summary>
-        [HarmonyPatch]
         public static class Patch_DefDatabase_GetByShortHash_SymbolDef
         {
             /// <summary>
@@ -380,8 +578,14 @@ namespace KCSG
             {
                 try
                 {
+                    // Ensure the registry is initialized
+                    if (!SymbolRegistry.Initialized)
+                    {
+                        SymbolRegistry.Initialize();
+                    }
+                    
                     string defName;
-                    if (Patch_DefDatabase_Add_SymbolDef.TryGetDefNameByHash(shortHash, out defName))
+                    if (SymbolRegistry.TryGetDefNameByHash(shortHash, out defName))
                     {
                         // Try to get from our shadow registry
                         object symbolDef;

@@ -124,40 +124,67 @@ namespace KCSG
         {
             try
             {
+                // Safety check: don't try to draw if we're in a context where GUI is not available
+                if (Current.Game == null || Find.TickManager == null)
+                {
+                    return;
+                }
+                
+                // Skip if rendering is suppressed
+                if (RenderingDetector.NoOutputRendering)
+                {
+                    return;
+                }
+            
                 if (showDebugWindow && Prefs.DevMode)
                 {
-                    windowRect = GUI.Window(594873, windowRect, DrawDebugWindow, "KCSG Unbound Symbol Monitor");
+                    try
+                    {
+                        windowRect = GUI.Window(594873, windowRect, DrawDebugWindow, "KCSG Unbound Symbol Monitor");
+                    }
+                    catch (Exception ex)
+                    {
+                        // Silently fail for GUI errors during window rendering
+                        if (Prefs.DevMode)
+                        {
+                            Log.Warning($"[KCSG Unbound] Debug window error: {ex.Message}");
+                        }
+                        showDebugWindow = false;
+                    }
                 }
                 
                 // Draw toggle button when Dev Mode is enabled
                 if (Prefs.DevMode)
                 {
-                    Rect buttonRect = new Rect(Screen.width - 150, 10, 140, 24);
-                    if (Widgets.ButtonText(buttonRect, "Symbol Monitor"))
+                    try
                     {
-                        showDebugWindow = !showDebugWindow;
-                    }
-                    
-                    // Draw error indicator if there have been errors
-                    if (hadErrors)
-                    {
-                        Rect errorRect = new Rect(Screen.width - 150, 40, 140, 24);
-                        GUI.color = Color.red;
-                        if (Widgets.ButtonText(errorRect, "KCSG Errors!"))
+                        Rect buttonRect = new Rect(Screen.width - 150, 10, 140, 24);
+                        if (Widgets.ButtonText(buttonRect, "Symbol Monitor"))
                         {
-                            showDebugWindow = true;
+                            showDebugWindow = !showDebugWindow;
                         }
-                        GUI.color = Color.white;
+                        
+                        // Draw error indicator if there have been errors
+                        if (hadErrors)
+                        {
+                            Rect errorRect = new Rect(Screen.width - 150, 40, 140, 24);
+                            GUI.color = Color.red;
+                            if (Widgets.ButtonText(errorRect, "KCSG Errors!"))
+                            {
+                                showDebugWindow = true;
+                            }
+                            GUI.color = Color.white;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // Silently ignore GUI errors in the button drawing
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // Avoid recursive errors in the error handling UI
-                if (!ex.Message.Contains("Error in UI drawing"))
-                {
-                    Log.Error($"[KCSG Unbound] Error in UI drawing: {ex}");
-                }
+                // Silently ignore all GUI errors to prevent UI spam
             }
         }
         
@@ -168,6 +195,11 @@ namespace KCSG
         {
             try
             {
+                if (SymbolRegistry.AllRegisteredDefNames == null)
+                {
+                    return; // Safety check
+                }
+                
                 Text.Font = GameFont.Small;
                 float margin = 10f;
                 float lineHeight = Text.LineHeight;
@@ -181,7 +213,7 @@ namespace KCSG
                 float remainingHeight = innerRect.height - statusRect.height - margin * 2;
                 
                 // If we have errors, show them in the top part
-                if (hadErrors && recentErrors.Count > 0)
+                if (hadErrors && recentErrors != null && recentErrors.Count > 0)
                 {
                     float errorSectionHeight = Math.Min(recentErrors.Count * lineHeight + lineHeight, 120f);
                     Rect errorRect = new Rect(innerRect.x, listTop, innerRect.width, errorSectionHeight);
@@ -196,8 +228,11 @@ namespace KCSG
                     float y = errorListRect.y;
                     foreach (string error in recentErrors)
                     {
-                        Widgets.Label(new Rect(errorListRect.x, y, errorListRect.width, lineHeight), error);
-                        y += lineHeight;
+                        if (!string.IsNullOrEmpty(error))
+                        {
+                            Widgets.Label(new Rect(errorListRect.x, y, errorListRect.width, lineHeight), error);
+                            y += lineHeight;
+                        }
                     }
                     
                     // Adjust remaining space
@@ -206,7 +241,10 @@ namespace KCSG
                 }
                 
                 Rect listRect = new Rect(innerRect.x, listTop, innerRect.width, remainingHeight);
-                Rect viewRect = new Rect(0, 0, listRect.width - 16f, Math.Max(lineHeight * 20, SymbolRegistry.RegisteredDefCount * lineHeight * 0.5f));
+                
+                // Safety check for extremely large def counts to avoid UI performance issues
+                int registeredDefsForUI = Math.Min(SymbolRegistry.RegisteredDefCount, 5000);
+                Rect viewRect = new Rect(0, 0, listRect.width - 16f, Math.Max(lineHeight * 20, registeredDefsForUI * lineHeight * 0.05f));
                 
                 // Draw status information
                 float statusY = statusRect.y;
@@ -241,7 +279,10 @@ namespace KCSG
                     Rect clearErrorsRect = new Rect(statusRect.x + statusRect.width * 0.52f, statusY, statusRect.width * 0.48f, lineHeight);
                     if (Widgets.ButtonText(clearErrorsRect, "Clear Errors"))
                     {
-                        recentErrors.Clear();
+                        if (recentErrors != null)
+                        {
+                            recentErrors.Clear();
+                        }
                         hadErrors = false;
                     }
                 }
@@ -262,8 +303,11 @@ namespace KCSG
                 }
                 catch (Exception ex)
                 {
-                    LogError($"Error drawing defs list: {ex}");
-                    Widgets.Label(new Rect(0, 0, viewRect.width, lineHeight), $"<color=red>Error drawing defs list: {ex.Message}</color>");
+                    if (Prefs.DevMode)
+                    {
+                        LogError($"Error drawing defs list: {ex.Message}");
+                        Widgets.Label(new Rect(0, 0, viewRect.width, lineHeight), $"<color=red>Error drawing defs list: {ex.Message}</color>");
+                    }
                 }
                 
                 Widgets.EndScrollView();
@@ -271,10 +315,10 @@ namespace KCSG
                 // Allow window to be dragged
                 GUI.DragWindow();
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // Last-resort error handling to avoid issues with the debug window itself
-                Log.Error($"[KCSG Unbound] Error in debug window: {ex}");
+                // Silently fail to avoid crashing
+                showDebugWindow = false;
             }
         }
         
@@ -283,32 +327,56 @@ namespace KCSG
         /// </summary>
         private void DrawDefsList(Rect viewRect, float lineHeight)
         {
-            Dictionary<char, int> defsByFirstLetter = new Dictionary<char, int>();
-            foreach (string defName in SymbolRegistry.AllRegisteredDefNames)
+            try
             {
-                if (string.IsNullOrEmpty(defName)) continue;
+                var registeredDefNames = SymbolRegistry.AllRegisteredDefNames;
+                if (registeredDefNames == null) return;
                 
-                char firstChar = char.ToUpper(defName[0]);
-                if (defsByFirstLetter.ContainsKey(firstChar))
+                Dictionary<char, int> defsByFirstLetter = new Dictionary<char, int>();
+                
+                // Limit to max 1000 def names to process for UI to avoid performance issues
+                int processedCount = 0;
+                foreach (string defName in registeredDefNames)
                 {
-                    defsByFirstLetter[firstChar]++;
+                    processedCount++;
+                    if (processedCount > 1000) break;
+                    
+                    if (string.IsNullOrEmpty(defName)) continue;
+                    
+                    char firstChar = char.ToUpper(defName[0]);
+                    if (defsByFirstLetter.ContainsKey(firstChar))
+                    {
+                        defsByFirstLetter[firstChar]++;
+                    }
+                    else
+                    {
+                        defsByFirstLetter[firstChar] = 1;
+                    }
                 }
-                else
+                
+                // Sort by letter
+                List<char> sortedLetters = new List<char>(defsByFirstLetter.Keys);
+                sortedLetters.Sort();
+                
+                float y = 0;
+                foreach (char letter in sortedLetters)
                 {
-                    defsByFirstLetter[firstChar] = 1;
+                    int count = defsByFirstLetter[letter];
+                    Widgets.Label(new Rect(0, y, viewRect.width, lineHeight), $"Defs starting with '{letter}': {count}");
+                    y += lineHeight;
+                }
+                
+                // Show sampling message if we limited the processing
+                if (processedCount >= 1000 && registeredDefsCount > 1000)
+                {
+                    y += lineHeight;
+                    Widgets.Label(new Rect(0, y, viewRect.width, lineHeight), 
+                        $"<color=yellow>Note: Showing summary based on first 1000 defs (of {registeredDefsCount} total)</color>");
                 }
             }
-            
-            // Sort by letter
-            List<char> sortedLetters = new List<char>(defsByFirstLetter.Keys);
-            sortedLetters.Sort();
-            
-            float y = 0;
-            foreach (char letter in sortedLetters)
+            catch (Exception)
             {
-                int count = defsByFirstLetter[letter];
-                Widgets.Label(new Rect(0, y, viewRect.width, lineHeight), $"Defs starting with '{letter}': {count}");
-                y += lineHeight;
+                // Silently fail to avoid UI errors
             }
         }
         

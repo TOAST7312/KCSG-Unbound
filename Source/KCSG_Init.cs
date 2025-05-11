@@ -22,11 +22,11 @@ namespace KCSG
         static KCSG_Init()
         {
             try
-            {
-                Log.Message("════════════════════════════════════════════════════");
-                Log.Message("║ [KCSG Unbound] Initializing                      ║");
-                Log.Message("║ Enhanced Structure Generation System Loading     ║");
-                Log.Message("════════════════════════════════════════════════════");
+        {
+            Log.Message("════════════════════════════════════════════════════");
+            Log.Message("║ [KCSG Unbound] Initializing                      ║");
+            Log.Message("║ Enhanced Structure Generation System Loading     ║");
+            Log.Message("════════════════════════════════════════════════════");
 
                 // Mark the start of initialization time for performance tracking
                 System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
@@ -35,14 +35,14 @@ namespace KCSG
                 // NOTE: Harmony patching is now handled earlier in KCSGUnboundMod constructor
                 // This ensures patches are applied before def loading begins
 
-                // Initialize symbol registry if not done already
-                if (!SymbolRegistry.Initialized)
-                {
-                    SymbolRegistry.Initialize();
-                }
-                
-                // Register our symbol resolvers
-                RegisterSymbolResolvers();
+            // Initialize symbol registry if not done already
+            if (!SymbolRegistry.Initialized)
+            {
+                SymbolRegistry.Initialize();
+            }
+            
+            // Register our symbol resolvers
+            RegisterSymbolResolvers();
                 
                 // Register our game component for monitoring SymbolDefs
                 RegisterGameComponents();
@@ -53,12 +53,12 @@ namespace KCSG
                 // Mark as successfully initialized
                 initialized = true;
 
-                Log.Message("════════════════════════════════════════════════════");
-                Log.Message("║ [KCSG Unbound] Initialization complete           ║");
-                Log.Message($"║ Registered {SymbolRegistry.RegisteredSymbolCount} symbol resolvers     ║");
+            Log.Message("════════════════════════════════════════════════════");
+            Log.Message("║ [KCSG Unbound] Initialization complete           ║");
+            Log.Message($"║ Registered {SymbolRegistry.RegisteredSymbolCount} symbol resolvers     ║");
                 Log.Message($"║ Startup time: {stopwatch.ElapsedMilliseconds}ms            ║");
-                Log.Message("════════════════════════════════════════════════════");
-            }
+            Log.Message("════════════════════════════════════════════════════");
+        }
             catch (Exception ex)
             {
                 Log.Error("════════════════════════════════════════════════════");
@@ -174,7 +174,7 @@ namespace KCSG
             {
                 // First try to find the named type in the current assembly
                 Type resolverType = Type.GetType($"KCSG.{resolverName}, Assembly-CSharp");
-                
+            
                 // If not found, look in all assemblies
                 if (resolverType == null)
                 {
@@ -234,7 +234,7 @@ namespace KCSG
                 Log.Error($"[KCSG Unbound] Failed to register symbol '{symbol}': {ex}");
             }
         }
-        
+
         /// <summary>
         /// Register game components for monitoring and management
         /// </summary>
@@ -242,13 +242,43 @@ namespace KCSG
         {
             try
             {
+                // Only register UI components in appropriate contexts
+                if (RenderingDetector.NoOutputRendering)
+                {
+                    Log.Message("[KCSG Unbound] Not registering UI components in headless/non-rendering context");
+                    return;
+                }
+
                 // Register the SymbolDefMonitor component if we have a current game
                 if (Current.Game != null)
                 {
-                    if (Current.Game.GetComponent<SymbolDefMonitor>() == null)
+                    // First check if one already exists
+                    SymbolDefMonitor existing = null;
+                    foreach (var comp in Current.Game.components)
                     {
-                        Current.Game.components.Add(new SymbolDefMonitor(Current.Game));
-                        Log.Message("[KCSG Unbound] SymbolDefMonitor component added to current game");
+                        if (comp is SymbolDefMonitor)
+                        {
+                            existing = comp as SymbolDefMonitor;
+                            break;
+                        }
+                    }
+                    
+                    // Only add if we don't already have one
+                    if (existing == null)
+                    {
+                        try
+                        {
+                            Current.Game.components.Add(new SymbolDefMonitor(Current.Game));
+                            Log.Message("[KCSG Unbound] SymbolDefMonitor component added to current game");
+                        }
+                        catch (Exception compEx)
+                        {
+                            Log.Error($"[KCSG Unbound] Failed to add SymbolDefMonitor component: {compEx.Message}");
+                        }
+                    }
+                    else
+                    {
+                        Log.Message("[KCSG Unbound] SymbolDefMonitor component already exists");
                     }
                 }
                 else

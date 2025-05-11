@@ -26,32 +26,28 @@ namespace KCSG
                 Log.Message("║ [KCSG Unbound] Early initialization              ║");
                 Log.Message("════════════════════════════════════════════════════");
                 
-                // Apply Harmony patches immediately, before def loading begins
+                // Set up Harmony patches early
                 SetupHarmony();
                 
-                // Initialize symbol registry early
-                if (!SymbolRegistry.Initialized)
-                {
-                    SymbolRegistry.Initialize();
-                }
-                
-                // Successfully initialized
-                initializationSuccess = true;
-                
-                Log.Message("[KCSG Unbound] Early initialization complete");
+                LongEventHandler.ExecuteWhenFinished(() => {
+                    if (initializationSuccess)
+                    {
+                        Log.Message("[KCSG Unbound] Initialization completed successfully");
+                    }
+                    else
+                    {
+                        Log.Warning("[KCSG Unbound] Initialization did not complete successfully");
+                    }
+                });
             }
             catch (Exception ex)
             {
-                initializationSuccess = false;
-                Log.Error("════════════════════════════════════════════════════");
-                Log.Error("║ [KCSG Unbound] EARLY INITIALIZATION FAILED        ║");
-                Log.Error("════════════════════════════════════════════════════");
-                Log.Error($"[KCSG Unbound] {ex}");
+                Log.Error($"[KCSG Unbound] Error during mod initialization: {ex}");
             }
         }
         
         /// <summary>
-        /// Setup Harmony patches early in the loading process
+        /// Set up Harmony patches
         /// </summary>
         private void SetupHarmony()
         {
@@ -59,53 +55,38 @@ namespace KCSG
             {
                 Log.Message("[KCSG Unbound] Setting up Harmony patches");
                 
+                // Create our Harmony instance
+                harmony = new Harmony("KCSG.Unbound");
+                
+                // First initialize our registry for maximum compatibility
+                SymbolRegistry.Initialize();
+                RimWorldCompatibility.ExploreAPIs();
+                
                 Log.Message("══════════════════════════════════════════════════");
                 Log.Message("║          KCSG UNBOUND - INITIALIZING           ║");
                 Log.Message("║        Symbol bypass mod for RimWorld 1.5      ║");
                 Log.Message("══════════════════════════════════════════════════");
                 
-                // First, check for conflicting Harmony instances
-                foreach (var inst in Harmony.GetAllPatchedMethods())
-                {
-                    if (inst.Name.Contains("SymbolDef") || inst.Name.Contains("SymbolResolver"))
-                    {
-                        Log.Warning($"[KCSG Unbound] Found potentially conflicting patch target: {inst.DeclaringType?.FullName}.{inst.Name}");
-                    }
-                }
-                
+                // Initialize the symbol registry
                 Log.Message("══════════════════════════════════════════════════");
                 Log.Message("║ [KCSG] DIRECT INITIALIZATION                    ║");
                 Log.Message("══════════════════════════════════════════════════");
+                Log.Message($"[KCSG] Setting up compatibility for RimWorld {RimWorldCompatibility.VersionString}");
                 
-                // Initialize and explore RimWorld API compatibility 
-                RimWorldCompatibility.Initialize();
+                // Use the new safe patch approach
+                HarmonyPatches.ApplyPatches(harmony);
                 
-                Log.Message("[KCSG] Created new shadow registry for unlimited symbols");
+                // Mark initialization as successful
+                initializationSuccess = true;
                 
-                // Create a new harmony instance if not already created
-                harmony = new Harmony("com.kcsg.unbound");
-                
-                // Apply all patches from patch classes in this assembly
-                harmony.PatchAll();
-                
-                // Update registry status
-                int nativeCount = 0;
-                Dictionary<string, Type> nativeResolvers = RimWorldCompatibility.GetSymbolResolvers();
-                if (nativeResolvers != null)
-                {
-                    nativeCount = nativeResolvers.Count;
-                }
-                
-                Log.Message($"[KCSG] Registry Status: Main ({nativeCount}/65535), Shadow (0/∞)");
-                
-                Log.Message("[KCSG] KCSG Unbound is ready!");
-                
-                Log.Message("[KCSG Unbound] Harmony patches applied successfully");
+                Log.Message("════════════════════════════════════════════════════");
             }
             catch (Exception ex)
             {
                 Log.Error($"[KCSG Unbound] Error applying Harmony patches: {ex}");
-                throw; // Re-throw to ensure the mod initialization fails properly
+                Log.Message("════════════════════════════════════════════════════");
+                Log.Message("║ [KCSG Unbound] EARLY INITIALIZATION FAILED        ║");
+                Log.Message("════════════════════════════════════════════════════");
             }
         }
         
