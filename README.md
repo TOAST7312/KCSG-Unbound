@@ -1,8 +1,5 @@
 # KCSG Unbound - Extended Def Limit
 
-##THIS MOD IS NOT FEATURE-COMPLETE!
-The below-listed features may or may not be implemented in the current version. The readme serves as information toward the goal of the mod and will evolve with ongoing changes.
-
 KCSG Unbound removes the 65,535 definition limitation in RimWorld, specifically targeting SymbolDefs used in procedural structure generation.
 
 ## What This Mod Does
@@ -20,19 +17,23 @@ KCSG Unbound provides an alternative registration system that:
 - **Compatible with existing mods**: Works with Vanilla Expanded Framework and other KCSG-based mods
 - **Monitoring system**: Includes a debug window (in dev mode) to track symbol usage
 - **Early patching**: Uses Harmony in the mod constructor to patch before def loading begins
+- **Improved error handling**: Robust exception handling for better stability
+- **Rendering detection**: Smart detection of rendering contexts to prevent UI errors
 
 ## Technical Details
 
 The mod employs two primary strategies to bypass the 65,535 def limit:
 
-1. **Custom Registry**: All SymbolDefs are registered in a parallel dictionary-based system
+1. **Custom Registry**: All SymbolDefs are registered in a parallel dictionary-based system with unlimited capacity
 2. **Transparent Lookup**: Intercepts DefDatabase.GetNamed and GetByShortHash calls to check both registries
+3. **Early Harmony Patching**: Applies patches during mod initialization before def loading begins
 
 ### Implementation Details
 
-- The SymbolRegistry class maintains a dictionary of unlimited size for both symbols and defs
+- The SymbolRegistry class maintains high-capacity dictionaries for both symbols and defs
 - Harmony patches intercept critical methods to ensure our custom registry is checked
-- Early patching ensures the system is in place before def loading begins
+- Error handling includes fallbacks and recovery mechanisms
+- SymbolDefMonitor provides real-time statistics and debugging information
 
 ## For Modders
 
@@ -72,11 +73,21 @@ To monitor your symbol usage (in Dev Mode):
 - Works with Vanilla Expanded Framework
 - Compatible with mods adding custom structure generation
 
+## Troubleshooting
+
+If you encounter issues:
+1. Check the KCSGUnbound_runtime_log.txt and KCSGUnbound_basegen_analysis.txt files in your RimWorld directory
+   - These logs are generated when you click "Copy statistics to log" in the Symbol Monitor
+   - They contain detailed information about registered symbols and errors
+2. Enable Dev Mode and use the Symbol Monitor to check for any errors
+3. Make sure this mod loads after Harmony but before content mods
+4. If you see red "KCSG Errors!" button, click it for details about what's going wrong
+
 ## Credits
 
 - Original KCSG system by Vanilla Expanded Framework team
 - Extended and maintained by community contributors
 
 ## License
-GNU General Public License v3.0 - See LICENSE file for details 
 
+GNU General Public License v3.0 - See LICENSE file for details 

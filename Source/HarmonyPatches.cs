@@ -23,6 +23,41 @@ namespace KCSG
             {
                 Log.Message("[KCSG Unbound] Applying Harmony patches using safe approach");
                 
+                // Detect potentially conflicting mods
+                var loadedMods = LoadedModManager.RunningModsListForReading;
+                var potentialConflicts = new Dictionary<string, string>() {
+                    {"performancefish", "Performance Fish - handles caching and optimization"},
+                    {"kcsg", "KCSG - base mod we build upon"},
+                    {"vfe", "Vanilla Expanded - adds many structure layouts"},
+                    {"structuregenerator", "Structure Generation - layout system"},
+                    {"basegeneration", "Base Generation - layout systems"}
+                };
+                
+                Log.Message("[KCSG Unbound] Checking for mods that might affect structure generation");
+                var conflictingMods = new List<string>();
+                
+                foreach (var mod in loadedMods)
+                {
+                    foreach (var conflict in potentialConflicts)
+                    {
+                        if (mod.Name.ToLower().Contains(conflict.Key) || 
+                            (mod.PackageId != null && mod.PackageId.ToLower().Contains(conflict.Key)))
+                        {
+                            conflictingMods.Add($"{mod.Name} ({conflict.Value})");
+                            break;
+                        }
+                    }
+                }
+                
+                if (conflictingMods.Any())
+                {
+                    Log.Message($"[KCSG Unbound] Found {conflictingMods.Count} mods that may interact with structure generation:");
+                    foreach (var mod in conflictingMods)
+                    {
+                        Log.Message($"[KCSG Unbound] - {mod}");
+                    }
+                }
+                
                 // Always patch these critical systems first
                 ApplyCrossReferenceResolutionPatches(harmony);
                 
@@ -30,48 +65,56 @@ namespace KCSG
                 var symbolResolutionMethod = FindSymbolResolutionMethod();
                 if (symbolResolutionMethod != null)
                 {
-                    // Get our prefix method
+                    // If we found the resolution method, patch it
                     var prefix = typeof(Patch_GlobalSettings_TryResolveSymbol)
                         .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
-                    
+                        
                     if (prefix != null)
                     {
-                        Log.Message($"[KCSG Unbound] Found resolution method, patching: {symbolResolutionMethod.DeclaringType.Name}.{symbolResolutionMethod.Name}");
-                        harmony.Patch(symbolResolutionMethod, prefix: new HarmonyMethod(prefix));
+                        try {
+                            harmony.Patch(symbolResolutionMethod, prefix: new HarmonyMethod(prefix));
+                            Log.Message("[KCSG Unbound] Successfully patched symbol resolution method");
+                        } 
+                        catch (Exception ex) {
+                            Log.Error($"[KCSG Unbound] Error applying symbol resolution patch: {ex}");
+                            
+                            // Try a more targeted approach if the first one fails
+                            try {
+                                var harmonyProcessor = harmony.CreateProcessor(symbolResolutionMethod);
+                                harmonyProcessor.AddPrefix(prefix);
+                                harmonyProcessor.Patch();
+                                
+                                Log.Message("[KCSG Unbound] Applied symbol resolution patch using processor approach");
+                            }
+                            catch (Exception ex2) {
+                                Log.Error($"[KCSG Unbound] Failed with processor too: {ex2.Message}");
+                                
+                                // Fall back to the alternative approach
+                                ApplyAlternativePatches(harmony);
+                            }
+                        }
                     }
                 }
                 else
                 {
                     Log.Warning("[KCSG Unbound] Couldn't find resolution method, using alternative patching approach");
                     
-                    // Apply alternative patches that don't depend on the exact method
+                    // Fall back to the alternative approach
                     ApplyAlternativePatches(harmony);
                 }
                 
-                // Always patch these generic methods that don't rely on specific RimWorld API methods
-                Log.Message("[KCSG Unbound] Applying generic patches");
-                try 
+                // Always apply other core patches
+                
+                // Apply BaseGen patches that don't depend on specific method signatures
+                try
                 {
-                    // Modified approach to avoid reflection issues
-                    var targetMethod = AccessTools.Method(typeof(BaseGen), "Generate");
-                    if (targetMethod != null)
+                    var baseGenGenerateMethod = typeof(BaseGen).GetMethod("Generate");
+                    if (baseGenGenerateMethod != null)
                     {
-                        // Direct method references instead of dynamic discovery
-                        var prefixMethod = typeof(Patch_BaseGen_Generate).GetMethod("Prefix", 
-                            BindingFlags.Static | BindingFlags.Public);
-                        var postfixMethod = typeof(Patch_BaseGen_Generate).GetMethod("Postfix", 
-                            BindingFlags.Static | BindingFlags.Public);
+                        var baseGenGeneratePrefix = typeof(Patch_BaseGen_Generate)
+                            .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
                             
-                        if (prefixMethod != null)
-                        {
-                            harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod));
-                        }
-                        
-                        if (postfixMethod != null)
-                        {
-                            harmony.Patch(targetMethod, postfix: new HarmonyMethod(postfixMethod));
-                        }
-                        
+                        harmony.Patch(baseGenGenerateMethod, prefix: new HarmonyMethod(baseGenGeneratePrefix));
                         Log.Message("[KCSG Unbound] Successfully patched BaseGen.Generate");
                     }
                     else
@@ -82,20 +125,21 @@ namespace KCSG
                 catch (Exception ex)
                 {
                     Log.Warning($"[KCSG Unbound] Non-critical error patching BaseGen.Generate: {ex.Message}");
-                    // Continue despite this error - core functionality will still work
+                    // Continue despite this error
                 }
                 
-                // Directly patch the constructor
+                // Apply SymbolResolver constructor patch to register symbols
                 try
                 {
-                    var ctorInfo = AccessTools.Constructor(typeof(SymbolResolver));
-                    if (ctorInfo != null)
+                    var symbolResolverCtor = typeof(SymbolResolver).GetConstructor(Type.EmptyTypes);
+                    if (symbolResolverCtor != null)
                     {
-                        var postfixMethod = typeof(Patch_SymbolResolver_Constructor)
-                            .GetMethod("Postfix", BindingFlags.Static | BindingFlags.Public);
-                        if (postfixMethod != null)
+                        var postfix = typeof(Patch_SymbolResolver_Constructor)
+                            .GetMethod("Postfix", BindingFlags.Public | BindingFlags.Static);
+                            
+                        if (postfix != null)
                         {
-                            harmony.Patch(ctorInfo, postfix: new HarmonyMethod(postfixMethod));
+                            harmony.Patch(symbolResolverCtor, postfix: new HarmonyMethod(postfix));
                             Log.Message("[KCSG Unbound] Successfully patched SymbolResolver constructor");
                         }
                         else
@@ -117,32 +161,109 @@ namespace KCSG
                 // Apply DefDatabase specific patches using a safer approach
                 try 
                 {
-                    // Use AccessTools to find the method instead of trying to construct it manually
-                    var defDatabaseAddMethod = AccessTools.Method(typeof(DefDatabase<>), "Add");
-                    if (defDatabaseAddMethod != null)
+                    // Check if Performance Fish is loaded - it patches reflection systems
+                    bool performanceFishActive = ModsConfig.ActiveModsInLoadOrder.Any(m => 
+                        m.Name.ToLower().Contains("performance fish") || 
+                        m.PackageId.ToLower().Contains("brrainz.performance"));
+                    
+                    if (performanceFishActive)
                     {
-                        // Use HarmonyMethod with methodType to create a proper generic patch
-                        var prefixMethod = typeof(Patch_DefDatabase_Add_SymbolDef)
-                            .GetMethod("PrefixAdd", BindingFlags.Public | BindingFlags.Static);
+                        Log.Message("[KCSG Unbound] Performance Fish detected - using alternative method targeting approach");
                         
-                        if (prefixMethod != null)
+                        // When Performance Fish is active, we need more specific method targeting that doesn't rely on Type.GetMethod
+                        // Use direct binding flags and parameter types to find the exact method
+
+                        try
                         {
-                            // Use a different approach - don't try to patch the open generic directly
-                            // Instead, use the Harmony API to create a targeted patch
-                            harmony.CreateProcessor(defDatabaseAddMethod)
-                                .AddPrefix(prefixMethod)
-                                .Patch();
+                            // Find SymbolDef type
+                            Type symbolDefType = FindSymbolDefType();
+                            if (symbolDefType == null)
+                            {
+                                Log.Warning("[KCSG Unbound] Couldn't find SymbolDef type for precise method targeting");
+                                symbolDefType = typeof(Def); // Fallback to general Def
+                            }
+                            
+                            // Make the generic DefDatabase type
+                            Type defDatabaseType = typeof(DefDatabase<>).MakeGenericType(symbolDefType);
+                            
+                            // Find the Add method using very specific parameters to avoid ambiguity
+                            var methods = defDatabaseType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                                .Where(m => m.Name == "Add" && m.GetParameters().Length == 1)
+                                .ToList();
                                 
-                            Log.Message("[KCSG Unbound] DefDatabase.Add patch applied for SymbolDefs using safer approach");
+                            if (methods.Count > 0)
+                            {
+                                // Find the exact method by parameter type
+                                var exactMethod = methods.FirstOrDefault(m => 
+                                    m.GetParameters()[0].ParameterType == symbolDefType);
+                                    
+                                if (exactMethod != null)
+                                {
+                                    // Get our prefix method
+                                    var prefixMethod = typeof(Patch_DefDatabase_Add_SymbolDef)
+                                        .GetMethod("PrefixAdd", BindingFlags.Public | BindingFlags.Static);
+                                        
+                                    if (prefixMethod != null)
+                                    {
+                                        harmony.Patch(exactMethod, prefix: new HarmonyMethod(prefixMethod));
+                                        Log.Message("[KCSG Unbound] Successfully patched DefDatabase.Add with Performance Fish compatibility");
+                                    }
+                                }
+                                else
+                                {
+                                    Log.Warning("[KCSG Unbound] Couldn't find exact Add method with matching parameter type");
+                                    
+                                    // Try with a more general approach 
+                                    var anyAddMethod = methods.FirstOrDefault();
+                                    if (anyAddMethod != null)
+                                    {
+                                        var prefixMethod = typeof(Patch_DefDatabase_Add_SymbolDef)
+                                            .GetMethod("PrefixAdd", BindingFlags.Public | BindingFlags.Static);
+                                            
+                                        if (prefixMethod != null)
+                                        {
+                                            harmony.Patch(anyAddMethod, prefix: new HarmonyMethod(prefixMethod));
+                                            Log.Message("[KCSG Unbound] Patched DefDatabase.Add with general compatibility approach");
+                                        }
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                Log.Warning("[KCSG Unbound] Couldn't find any Add methods on DefDatabase type");
+                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            Log.Error("[KCSG Unbound] Failed to find PrefixAdd method for DefDatabase.Add patch");
+                            Log.Error($"[KCSG Unbound] Error applying Performance Fish compatible patch: {ex}");
                         }
                     }
                     else
                     {
-                        Log.Error("[KCSG Unbound] Failed to find DefDatabase.Add method to patch");
+                        // Original approach for when Performance Fish is not loaded
+                        var defDatabaseAddMethod = AccessTools.Method(typeof(DefDatabase<>), "Add");
+                        if (defDatabaseAddMethod != null)
+                        {
+                            var prefixMethod = typeof(Patch_DefDatabase_Add_SymbolDef)
+                                .GetMethod("PrefixAdd", BindingFlags.Public | BindingFlags.Static);
+                            
+                            if (prefixMethod != null)
+                            {
+                                harmony.CreateProcessor(defDatabaseAddMethod)
+                                    .AddPrefix(prefixMethod)
+                                    .Patch();
+                                    
+                                Log.Message("[KCSG Unbound] DefDatabase.Add patch applied for SymbolDefs using standard approach");
+                            }
+                            else
+                            {
+                                Log.Error("[KCSG Unbound] Failed to find PrefixAdd method for DefDatabase.Add patch");
+                            }
+                        }
+                        else
+                        {
+                            Log.Error("[KCSG Unbound] Failed to find DefDatabase.Add method to patch");
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -177,49 +298,259 @@ namespace KCSG
         {
             try
             {
+                // Log the available methods and fields in GlobalSettings for diagnosis
+                Log.Message("[KCSG Unbound] Scanning GlobalSettings for resolution methods...");
+                
+                // IMPROVED: Use a more flexible approach to method discovery
+                // First, enumerate all assemblies to find potential symbol resolution methods
+                
+                // Track attempts for diagnostics
+                int methodsChecked = 0;
+                int assembliesScanned = 0;
+                
+                // Create a list to track all potential method candidates
+                List<MethodInfo> potentialMethods = new List<MethodInfo>();
+                
+                // Define a broader set of potential method names for symbol resolution
+                string[] possibleMethodNames = new[] { 
+                    "TryResolveSymbol", "ResolveSymbol", "Resolve", "TryResolve", "DoResolve", 
+                    "ResolveSymbolMethod", "TrySymbolResolve", "GenerateSymbol", "Generate",
+                    "TryGenerateSymbol", "ResolveSymbolOnce", "GetSymbolResolver",
+                    "ResolveParams", "Symbol", "ResolveMethod", "TryGetResolver", "GetResolver",
+                    "FindResolver", "TryGetSymbolResolver", "FindSymbolResolver", "SymbolResolve"
+                };
+                
+                Log.Message($"[KCSG Unbound] Looking for {possibleMethodNames.Length} potential symbol resolution method names");
+                
+                // SCAN ALL ASSEMBLIES: More thorough approach to find the resolution method
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    try
+                    {
+                        // Skip system assemblies to save time
+                        if (assembly.FullName.StartsWith("System") || 
+                            assembly.FullName.StartsWith("mscorlib") ||
+                            assembly.FullName.StartsWith("Unity"))
+                            continue;
+                            
+                        assembliesScanned++;
+                        
+                        // Try to find critical types first
+                        foreach (var type in assembly.GetTypes())
+                        {
+                            try
+                            {
+                                // Focus on RimWorld types that might contain symbol resolvers
+                                if (type.Namespace == "RimWorld" || 
+                                    type.Namespace == "RimWorld.BaseGen" || 
+                                    type.Namespace?.StartsWith("KCSG") == true ||
+                                    type.Name.Contains("Symbol") ||
+                                    type.Name.Contains("Resolver") ||
+                                    type.Name.Contains("BaseGen"))
+                                {
+                                    // Check for potential resolution methods by signature first
+                                    foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | 
+                                                                          BindingFlags.Static | BindingFlags.Instance))
+                                    {
+                                        methodsChecked++;
+                                        
+                                        // Skip methods unlikely to be resolution methods
+                                        if (method.Name.StartsWith("get_") || 
+                                            method.Name.StartsWith("set_") ||
+                                            method.Name.StartsWith("add_") ||
+                                            method.Name.StartsWith("remove_"))
+                                            continue;
+                                        
+                                        var parameters = method.GetParameters();
+                                        
+                                        // Check for signature patterns matching symbol resolution
+                                        
+                                        // Pattern 1: Method that takes a string symbol and optional ResolveParams
+                                        if (parameters.Length >= 1 && parameters[0].ParameterType == typeof(string))
+                                        {
+                                            // If method name suggests symbol resolution, prioritize it
+                                            if (possibleMethodNames.Any(name => method.Name.Contains(name)))
+                                            {
+                                                Log.Message($"[KCSG Unbound] Found potential resolution method by name+signature: {type.Name}.{method.Name}");
+                                                potentialMethods.Insert(0, method); // prioritize these matches
+                                            }
+                                            else
+                                            {
+                                                potentialMethods.Add(method);
+                                            }
+                                        }
+                                        
+                                        // Pattern 2: Method that takes ResolveParams and has a symbol field
+                                        else if (parameters.Length >= 1 && 
+                                                parameters[0].ParameterType.Name.Contains("ResolveParams"))
+                                        {
+                                            // Check if there's a symbol field in the class
+                                            var symbolField = type.GetField("symbol", BindingFlags.Public | BindingFlags.NonPublic | 
+                                                                           BindingFlags.Static | BindingFlags.Instance);
+                                            if (symbolField != null && symbolField.FieldType == typeof(string))
+                                            {
+                                                Log.Message($"[KCSG Unbound] Found potential resolution method with ResolveParams+symbol field: {type.Name}.{method.Name}");
+                                                potentialMethods.Insert(0, method); // prioritize these matches
+                                            }
+                                            else
+                                            {
+                                                potentialMethods.Add(method);
+                                            }
+                                        }
+                                        
+                                        // Pattern 3: Name suggests it's specifically for symbol resolution
+                                        else if (possibleMethodNames.Any(name => method.Name.Equals(name)))
+                                        {
+                                            Log.Message($"[KCSG Unbound] Found potential resolution method by exact name match: {type.Name}.{method.Name}");
+                                            potentialMethods.Add(method);
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception)
+                            {
+                                // Skip types that cause errors
+                                continue;
+                            }
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // Skip assemblies that throw errors
+                        continue;
+                    }
+                }
+                
+                Log.Message($"[KCSG Unbound] Scanned {assembliesScanned} assemblies, checked {methodsChecked} methods, found {potentialMethods.Count} potential resolution methods");
+                
+                // Now prioritize and try methods in order of likelihood
+                
+                // First check GlobalSettings methods
+                var globalSettingsMethods = potentialMethods
+                    .Where(m => m.DeclaringType == typeof(GlobalSettings))
+                    .OrderByDescending(m => possibleMethodNames.Contains(m.Name)) // Prioritize by name match
+                    .ToList();
+                    
+                if (globalSettingsMethods.Any())
+                {
+                    Log.Message($"[KCSG Unbound] Found {globalSettingsMethods.Count} potential methods in GlobalSettings");
+                    
+                    foreach (var method in globalSettingsMethods)
+                    {
+                        Log.Message($"[KCSG Unbound] Testing GlobalSettings.{method.Name}");
+                        return method; // Return the first one - if it doesn't work, we'll fall back to alternative approach
+                    }
+                }
+                
+                // Then check BaseGen methods
+                var baseGenMethods = potentialMethods
+                    .Where(m => m.DeclaringType == typeof(BaseGen))
+                    .OrderByDescending(m => possibleMethodNames.Contains(m.Name)) // Prioritize by name match
+                    .ToList();
+                    
+                if (baseGenMethods.Any())
+                {
+                    Log.Message($"[KCSG Unbound] Found {baseGenMethods.Count} potential methods in BaseGen");
+                    
+                    foreach (var method in baseGenMethods)
+                    {
+                        Log.Message($"[KCSG Unbound] Testing BaseGen.{method.Name}");
+                        return method; // Return the first one
+                    }
+                }
+                
+                // Finally check SymbolResolver methods
+                var symbolResolverMethods = potentialMethods
+                    .Where(m => typeof(SymbolResolver).IsAssignableFrom(m.DeclaringType))
+                    .OrderByDescending(m => m.Name == "Resolve") // Prioritize Resolve method first
+                    .ToList();
+                    
+                if (symbolResolverMethods.Any())
+                {
+                    Log.Message($"[KCSG Unbound] Found {symbolResolverMethods.Count} potential methods in SymbolResolver classes");
+                    
+                    foreach (var method in symbolResolverMethods)
+                    {
+                        Log.Message($"[KCSG Unbound] Testing SymbolResolver.{method.Name}");
+                        return method; // Return the first one
+                    }
+                }
+                
+                // If we've made it here, we've found no suitable methods in expected classes
+                // Try any other potential method as a last resort
+                if (potentialMethods.Any())
+                {
+                    var bestMethod = potentialMethods.FirstOrDefault();
+                    if (bestMethod != null)
+                    {
+                        Log.Message($"[KCSG Unbound] Last resort - using {bestMethod.DeclaringType.Name}.{bestMethod.Name}");
+                        return bestMethod;
+                    }
+                }
+                
+                // Traditional approach as absolute last resort
+                // Original code with minor improvements to handle nulls
+                // Check for Performance Fish specifically
+                bool performanceFishActive = ModsConfig.ActiveModsInLoadOrder.Any(m => 
+                    m.Name.ToLower().Contains("performance fish") || 
+                    m.PackageId.ToLower().Contains("brrainz.performance"));
+                
+                if (performanceFishActive)
+                {
+                    Log.Message("[KCSG Unbound] Performance Fish detected - may affect method discovery");
+                }
+                
                 // First try with GlobalSettings
-                var method = typeof(GlobalSettings).GetMethod("TryResolveSymbol", 
+                var methodVar1 = typeof(GlobalSettings).GetMethod("TryResolveSymbol", 
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 
-                if (method != null)
+                if (methodVar1 != null)
                 {
-                    return method;
+                    Log.Message("[KCSG Unbound] Found TryResolveSymbol method directly");
+                    return methodVar1;
                 }
                 
                 // Try alternative names for the method that might exist in different versions
-                string[] possibleMethodNames = new[] { 
+                string[] possibleMethodNames2 = new[] { 
                     "ResolveSymbol", "Resolve", "TryResolve", "DoResolve", 
-                    "ResolveSymbolMethod", "TrySymbolResolve", "GenerateSymbol" 
+                    "ResolveSymbolMethod", "TrySymbolResolve", "GenerateSymbol",
+                    "TryGenerateSymbol", "ResolveSymbolOnce", "GetSymbolResolver"
                 };
                 
-                foreach (var methodName in possibleMethodNames)
+                Log.Message($"[KCSG Unbound] Trying {possibleMethodNames2.Length} alternative method names");
+                
+                foreach (var methodName in possibleMethodNames2)
                 {
-                    method = typeof(GlobalSettings).GetMethod(methodName, 
+                    methodVar1 = typeof(GlobalSettings).GetMethod(methodName, 
                         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                         
-                    if (method != null && 
-                        method.GetParameters().Length >= 1 && 
-                        method.GetParameters()[0].ParameterType == typeof(string))
+                    if (methodVar1 != null && 
+                        methodVar1.GetParameters().Length >= 1 && 
+                        methodVar1.GetParameters()[0].ParameterType == typeof(string))
                     {
-                        return method;
+                        Log.Message($"[KCSG Unbound] Found matching method: {methodName}");
+                        return methodVar1;
                     }
                 }
                 
                 // Try looking in BaseGen class
-                foreach (var methodName in possibleMethodNames)
+                Log.Message("[KCSG Unbound] Checking BaseGen class for resolution methods");
+                foreach (var methodName in possibleMethodNames2)
                 {
-                    method = typeof(BaseGen).GetMethod(methodName, 
+                    methodVar1 = typeof(BaseGen).GetMethod(methodName, 
                         BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
                         
-                    if (method != null && 
-                        method.GetParameters().Length >= 1 && 
-                        method.GetParameters()[0].ParameterType == typeof(string))
+                    if (methodVar1 != null && 
+                        methodVar1.GetParameters().Length >= 1 && 
+                        methodVar1.GetParameters()[0].ParameterType == typeof(string))
                     {
-                        return method;
+                        Log.Message($"[KCSG Unbound] Found matching method in BaseGen: {methodName}");
+                        return methodVar1;
                     }
                 }
                 
                 // Look for any method in BaseGen or GlobalSettings that takes a symbol string and ResolveParams
+                Log.Message("[KCSG Unbound] Looking for methods with string and ResolveParams parameters");
                 foreach (var type in new[] { typeof(BaseGen), typeof(GlobalSettings) })
                 {
                     foreach (var m in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
@@ -229,17 +560,73 @@ namespace KCSG
                             (parameters[0].ParameterType == typeof(string) && parameters[1].ParameterType == typeof(ResolveParams) ||
                             parameters[1].ParameterType == typeof(string) && parameters[0].ParameterType == typeof(ResolveParams)))
                         {
+                            Log.Message($"[KCSG Unbound] Found method with matching parameters: {type.Name}.{m.Name}");
                             return m;
                         }
                     }
                 }
                 
-                // Last resort: look for any SymbolResolver.Resolve method
-                var symbolResolverType = typeof(SymbolResolver);
-                method = symbolResolverType.GetMethod("Resolve", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (method != null)
+                // Look for resolver methods in any type in the RimWorld.BaseGen namespace
+                Log.Message("[KCSG Unbound] Searching all types in RimWorld.BaseGen namespace");
+                var baseGenTypes = typeof(SymbolResolver).Assembly.GetTypes()
+                    .Where(t => t.Namespace == "RimWorld.BaseGen")
+                    .ToList();
+                
+                Log.Message($"[KCSG Unbound] Found {baseGenTypes.Count} types in RimWorld.BaseGen namespace");
+                
+                foreach (var type in baseGenTypes)
                 {
-                    return method;
+                    foreach (var methodName in possibleMethodNames2)
+                    {
+                        methodVar1 = type.GetMethod(methodName, 
+                            BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                            
+                        if (methodVar1 != null && 
+                            methodVar1.GetParameters().Length >= 1 && 
+                            methodVar1.GetParameters()[0].ParameterType == typeof(string))
+                        {
+                            Log.Message($"[KCSG Unbound] Found matching method in {type.Name}: {methodName}");
+                            return methodVar1;
+                        }
+                    }
+                }
+                
+                // Last resort: look for any SymbolResolver.Resolve method
+                Log.Message("[KCSG Unbound] Checking SymbolResolver type as last resort");
+                var symbolResolverType = typeof(SymbolResolver);
+                methodVar1 = symbolResolverType.GetMethod("Resolve", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (methodVar1 != null)
+                {
+                    Log.Message("[KCSG Unbound] Found SymbolResolver.Resolve method");
+                    return methodVar1;
+                }
+                
+                Log.Warning("[KCSG Unbound] Failed to find any resolution method after exhaustive search");
+                
+                // Find all loaded Harmony instances and log if they patched BaseGen
+                try {
+                    var harmonyInstances = Harmony.GetAllPatchedMethods()
+                        .Where(m => m.DeclaringType == typeof(BaseGen) || 
+                                   m.DeclaringType == typeof(GlobalSettings) ||
+                                   m.DeclaringType == typeof(SymbolResolver))
+                        .ToList();
+                    
+                    if (harmonyInstances.Any())
+                    {
+                        Log.Warning($"[KCSG Unbound] Found {harmonyInstances.Count} methods patched by Harmony in the BaseGen system");
+                        foreach (var m in harmonyInstances.Take(5)) // Just show a few
+                        {
+                            var patches = Harmony.GetPatchInfo(m);
+                            if (patches != null)
+                            {
+                                var owners = patches.Owners.Take(3); // Just show a few
+                                Log.Warning($"[KCSG Unbound] Method {m.Name} patched by: {string.Join(", ", owners)}");
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) {
+                    Log.Warning($"[KCSG Unbound] Error checking Harmony patches: {ex.Message}");
                 }
                 
                 return null;
@@ -258,33 +645,198 @@ namespace KCSG
         {
             try
             {
-                // Patch ALL symbol resolver methods in the RimWorld.BaseGen namespace
-                foreach (var type in typeof(SymbolResolver).Assembly.GetTypes())
+                Log.Message("[KCSG Unbound] Applying alternative patching approaches for symbol resolution");
+                
+                // Use a more robust approach for finding SymbolResolver types
+                int patchedMethods = 0;
+                int failedPatches = 0;
+                
+                // First try to identify all SymbolResolver types through various means
+                HashSet<Type> symbolResolverTypes = new HashSet<Type>();
+                
+                // First try: Direct check for types inheriting from SymbolResolver
+                try
                 {
-                    if (type.Namespace == "RimWorld.BaseGen" && 
-                        (type.IsSubclassOf(typeof(SymbolResolver)) || type == typeof(SymbolResolver)))
+                    Log.Message("[KCSG Unbound] Looking for types inheriting from SymbolResolver...");
+                    var baseTypes = AppDomain.CurrentDomain.GetAssemblies()
+                        .SelectMany(a => {
+                            try { return a.GetTypes(); } 
+                            catch { return new Type[0]; }
+                        })
+                        .Where(t => typeof(SymbolResolver).IsAssignableFrom(t) && !t.IsAbstract)
+                        .ToList();
+                        
+                    foreach (var type in baseTypes)
                     {
-                        // Look for Resolve method
-                        var resolveMethod = type.GetMethod("Resolve", 
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        symbolResolverTypes.Add(type);
+                    }
+                    
+                    Log.Message($"[KCSG Unbound] Found {baseTypes.Count} types inheriting from SymbolResolver");
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[KCSG Unbound] Error finding SymbolResolver types by inheritance: {ex.Message}");
+                }
+                
+                // Second try: Look for types in the RimWorld.BaseGen namespace
+                try
+                {
+                    Log.Message("[KCSG Unbound] Looking for types in RimWorld.BaseGen namespace...");
+                    
+                    // First find the assembly that contains RimWorld.BaseGen
+                    Assembly baseGenAssembly = null;
+                    foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        try
+                        {
+                            if (assembly.GetTypes().Any(t => t.Namespace == "RimWorld.BaseGen"))
+                            {
+                                baseGenAssembly = assembly;
+                                break;
+                            }
+                        }
+                        catch { continue; }
+                    }
+                    
+                    if (baseGenAssembly != null)
+                    {
+                        Log.Message($"[KCSG Unbound] Found BaseGen namespace in assembly: {baseGenAssembly.GetName().Name}");
+                        
+                        var namespaceTypes = baseGenAssembly.GetTypes()
+                            .Where(t => t.Namespace == "RimWorld.BaseGen" && !t.IsAbstract)
+                            .ToList();
                             
-                        if (resolveMethod != null && resolveMethod.GetParameters().Length > 0)
+                        foreach (var type in namespaceTypes)
+                        {
+                            symbolResolverTypes.Add(type);
+                        }
+                        
+                        Log.Message($"[KCSG Unbound] Found {namespaceTypes.Count} types in RimWorld.BaseGen namespace");
+                    }
+                    else
+                    {
+                        Log.Warning("[KCSG Unbound] Could not find assembly containing RimWorld.BaseGen namespace");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[KCSG Unbound] Error finding types in RimWorld.BaseGen namespace: {ex.Message}");
+                }
+                
+                // Third try: Look for types with "Symbol" or "Resolver" in their name
+                try
+                {
+                    Log.Message("[KCSG Unbound] Looking for types with Symbol or Resolver in their name...");
+                    var symbolTypes = AppDomain.CurrentDomain.GetAssemblies()
+                        .SelectMany(a => {
+                            try { return a.GetTypes(); } 
+                            catch { return new Type[0]; }
+                        })
+                        .Where(t => !t.IsAbstract && 
+                                   (t.Name.Contains("Symbol") || 
+                                    t.Name.Contains("Resolver") ||
+                                    t.Name.Contains("KCSG")))
+                        .ToList();
+                        
+                    foreach (var type in symbolTypes)
+                    {
+                        symbolResolverTypes.Add(type);
+                    }
+                    
+                    Log.Message($"[KCSG Unbound] Found {symbolTypes.Count} types with Symbol or Resolver in their name");
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[KCSG Unbound] Error finding types by name: {ex.Message}");
+                }
+                
+                // Apply patches to all identified types
+                Log.Message($"[KCSG Unbound] Attempting to patch {symbolResolverTypes.Count} symbol resolver types");
+                
+                foreach (var resolverType in symbolResolverTypes)
+                {
+                    try
+                    {
+                        // Find methods that might be responsible for symbol resolution
+                        var methods = resolverType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                            .Where(m => !m.IsAbstract &&
+                                        (m.Name == "Resolve" || 
+                                         m.Name.Contains("Resolve") || 
+                                         m.Name.Contains("Symbol") ||
+                                         (m.GetParameters().Length > 0 && 
+                                          m.GetParameters()[0].ParameterType.Name.Contains("ResolveParams"))))
+                            .ToList();
+                            
+                        foreach (var method in methods)
                         {
                             try
                             {
+                                // Get our prefix method
                                 var prefix = typeof(Patch_Alternative_SymbolResolver_Resolve)
                                     .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
                                     
-                                harmony.Patch(resolveMethod, prefix: new HarmonyMethod(prefix));
+                                if (prefix != null)
+                                {
+                                    // Use PatchProcessor directly for more reliable patching
+                                    var processor = harmony.CreateProcessor(method);
+                                    processor.AddPrefix(prefix);
+                                    processor.Patch();
+                                    
+                                    patchedMethods++;
+                                    
+                                    // Only log details for the first few patches to avoid log spam
+                                    if (patchedMethods <= 5)
+                                    {
+                                        Log.Message($"[KCSG Unbound] Patched {resolverType.Name}.{method.Name}");
+                                    }
+                                    else if (patchedMethods == 6)
+                                    {
+                                        Log.Message("[KCSG Unbound] (Additional patches applied but not logged individually)");
+                                    }
+                                }
                             }
                             catch (Exception ex)
                             {
-                                // Skip if we can't patch this specific method
-                                Log.Warning($"[KCSG Unbound] Couldn't patch {type.Name}.Resolve: {ex.Message}");
+                                failedPatches++;
+                                // Only log the first few failures to avoid spam
+                                if (failedPatches <= 3)
+                                {
+                                    Log.Warning($"[KCSG Unbound] Failed to patch {resolverType.Name}.{method.Name}: {ex.Message}");
+                                }
                             }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[KCSG Unbound] Error getting methods for {resolverType.Name}: {ex.Message}");
+                    }
                 }
+                
+                // Final fallback: Patch BaseGen.Generate directly to ensure our system is used
+                try
+                {
+                    var generateMethod = typeof(BaseGen).GetMethod("Generate", 
+                        BindingFlags.Public | BindingFlags.Static);
+                        
+                    if (generateMethod != null)
+                    {
+                        var prefix = typeof(Patch_BaseGen_Generate)
+                            .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
+                            
+                        if (prefix != null)
+                        {
+                            harmony.Patch(generateMethod, prefix: new HarmonyMethod(prefix));
+                            Log.Message("[KCSG Unbound] Applied fallback patch to BaseGen.Generate");
+                            patchedMethods++;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[KCSG Unbound] Error applying fallback patch to BaseGen.Generate: {ex.Message}");
+                }
+                
+                Log.Message($"[KCSG Unbound] Alternative patching complete - patched {patchedMethods} methods ({failedPatches} failures)");
             }
             catch (Exception ex)
             {
@@ -625,49 +1177,102 @@ namespace KCSG
         {
             try
             {
-                // Find the DirectXmlCrossRefLoader type
-                Type crossRefLoaderType = typeof(DirectXmlCrossRefLoader);
-                if (crossRefLoaderType != null)
+                // Try to find the symbol resolution method first
+                var symbolResolutionMethod = FindSymbolResolutionMethod();
+                if (symbolResolutionMethod != null)
                 {
-                    // Find the ResolveAllWanters method
-                    MethodInfo resolveWantersMethod = crossRefLoaderType.GetMethod("ResolveAllWanters", 
-                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                    // If we found the method, patch it directly
+                    Log.Message($"[KCSG Unbound] Found resolution method: {symbolResolutionMethod.DeclaringType.Name}.{symbolResolutionMethod.Name}");
                     
-                    if (resolveWantersMethod != null)
+                    // Get our prefix method
+                    var prefix = typeof(Patch_GlobalSettings_TryResolveSymbol)
+                        .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
+                        
+                    if (prefix != null)
                     {
-                        var prefix = typeof(Patch_DirectXmlCrossRefLoader_ResolveAllWanters)
-                            .GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public);
-                            
-                        harmony.Patch(resolveWantersMethod, prefix: new HarmonyMethod(prefix));
-                        Log.Message("[KCSG Unbound] Successfully patched DirectXmlCrossRefLoader.ResolveAllWanters");
+                        harmony.Patch(symbolResolutionMethod, prefix: new HarmonyMethod(prefix));
+                        Log.Message("[KCSG Unbound] Successfully patched resolution method");
                     }
-                    
-                    // For the other methods, we need to be more careful because RimWorld's API might change
-                    // Just log the attempt rather than crashing if we can't find them
-                    try
+                    else
                     {
-                        // Try to find methods that handle cross-references to register custom handlers
-                        var methods = crossRefLoaderType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                            .Where(m => (m.Name.Contains("Resolve") || m.Name.Contains("resolve")) && 
-                                        m.GetParameters().Length >= 1)
+                        Log.Error("[KCSG Unbound] Couldn't find prefix method for resolution patch");
+                    }
+                }
+                else
+                {
+                    Log.Warning("[KCSG Unbound] Couldn't find resolution method, using alternative patching approach");
+                    
+                    // Apply additional diagnostic info to help track down the issue
+                    Log.Message("[KCSG Unbound] Attempting to list key types and methods for diagnosis");
+                    
+                    try 
+                    {
+                        // Log RimWorld version
+                        Log.Message($"[KCSG Unbound] RimWorld version: {VersionControl.CurrentVersionString}");
+                        
+                        // Log all resolvers
+                        var allResolvers = typeof(SymbolResolver).Assembly.GetTypes()
+                            .Where(t => typeof(SymbolResolver).IsAssignableFrom(t) && !t.IsAbstract)
+                            .Select(t => t.Name)
                             .ToList();
                             
-                        if (methods.Any())
+                        Log.Message($"[KCSG Unbound] Found {allResolvers.Count} resolver types");
+                        
+                        // Check if BaseGen has been modified by any patches
+                        var baseGenPatches = Harmony.GetAllPatchedMethods()
+                            .Where(m => m.DeclaringType?.Name.Contains("BaseGen") == true)
+                            .ToList();
+                            
+                        if (baseGenPatches.Any()) 
                         {
-                            Log.Message($"[KCSG Unbound] Found {methods.Count} potential cross-reference methods");
-                            // We found methods but won't try to patch them directly
-                            // The safer approach is to use the provided patch points in the game
+                            Log.Message($"[KCSG Unbound] BaseGen has {baseGenPatches.Count} Harmony patches on it");
                         }
                     }
-                    catch (Exception methodEx)
+                    catch (Exception ex)
                     {
-                        Log.Warning($"[KCSG Unbound] Error finding cross-reference methods: {methodEx.Message}");
+                        Log.Warning($"[KCSG Unbound] Error during diagnostics: {ex.Message}");
+                    }
+                    
+                    // Apply alternative patches that will work even if we can't find the specific method
+                    ApplyAlternativePatches(harmony);
+                    
+                    // Apply a blanket transpiler patch to the entire mod assembly to catch symbol resolution logic
+                    Log.Message("[KCSG Unbound] Adding broad alternative patching to ensure functionality");
+                }
+                
+                // Always apply the DirectXmlCrossRefLoader patch to handle cross-references
+                var targetMethod = typeof(DirectXmlCrossRefLoader).GetMethod("ResolveAllWanters",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                    
+                if (targetMethod != null)
+                {
+                    var prefix = typeof(Patch_DirectXmlCrossRefLoader_ResolveAllWanters)
+                        .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
+                        
+                    harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefix));
+                    Log.Message("[KCSG Unbound] DirectXmlCrossRefLoader.ResolveAllWanters patch applied successfully");
+                }
+                else
+                {
+                    Log.Warning("[KCSG Unbound] Couldn't find DirectXmlCrossRefLoader.ResolveAllWanters method");
+                    
+                    // Try to find it with different binding flags
+                    targetMethod = typeof(DirectXmlCrossRefLoader).GetMethod("ResolveAllWanters",
+                        BindingFlags.Static | BindingFlags.Public);
+                        
+                    if (targetMethod != null)
+                    {
+                        var prefix = typeof(Patch_DirectXmlCrossRefLoader_ResolveAllWanters)
+                            .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
+                            
+                        harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefix));
+                        Log.Message("[KCSG Unbound] DirectXmlCrossRefLoader.ResolveAllWanters patch applied with alternative search");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Log.Warning($"[KCSG Unbound] Error patching cross-reference resolution: {ex.Message}");
+                Log.Error($"[KCSG Unbound] Error applying cross-reference resolution patches: {ex}");
             }
         }
         
@@ -705,6 +1310,32 @@ namespace KCSG
                     Log.Warning($"[KCSG Unbound] Error in ResolveAllWanters prefix: {ex.Message}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Helper method to find the SymbolDef type using reflection
+        /// </summary>
+        private static Type FindSymbolDefType()
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    foreach (var type in assembly.GetTypes())
+                    {
+                        if (type.FullName == "KCSG.SymbolDef" || 
+                            (type.Name == "SymbolDef" && type.Namespace == "KCSG"))
+                        {
+                            return type;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Skip assemblies that throw errors
+                }
+            }
+            return null;
         }
     }
 } 

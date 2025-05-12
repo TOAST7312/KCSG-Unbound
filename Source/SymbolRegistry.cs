@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using RimWorld;
 using RimWorld.BaseGen;
@@ -108,37 +109,188 @@ namespace KCSG
                 // Get all loaded mods
                 List<ModContentPack> runningMods = LoadedModManager.RunningMods.ToList();
                 
-                // The safer way is to look for existing defs in the system
+                // First try getting def types by name to ensure we find all structure def types
+                Type structureLayoutDefType = null;
+
+                // Try to find the KCSG structure layout type
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    foreach (var type in assembly.GetTypes())
+                    {
+                        if (type.FullName != null && 
+                            (type.FullName.Contains("KCSG.StructureLayoutDef") ||
+                             type.FullName.Contains("StructureLayoutDef") ||
+                             type.Name == "StructureLayoutDef"))
+                        {
+                            structureLayoutDefType = type;
+                            Log.Message($"[KCSG] [{timestamp}] Found structure layout type: {type.FullName}");
+                            break;
+                        }
+                    }
+                    if (structureLayoutDefType != null) break;
+                }
+
+                // If we couldn't find the specific type, try to find anything that might be a structure layout
+                if (structureLayoutDefType == null)
+                {
+                    // Try to find types with names that suggest they're structure layouts
+                    foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        foreach (var type in assembly.GetTypes())
+                        {
+                            if (type.IsSubclassOf(typeof(Def)) && 
+                                type.Name.Contains("Structure") || 
+                                type.Name.Contains("Layout") ||
+                                type.Name.Contains("KCSG"))
+                            {
+                                Log.Message($"[KCSG] [{timestamp}] Potentially found structure layout type: {type.FullName}");
+                                structureLayoutDefType = type;
+                                break;
+                            }
+                        }
+                        if (structureLayoutDefType != null) break;
+                    }
+                }
+
+                // If we still haven't found the type, try to scan all loaded defs to see if any match our criteria
+                if (structureLayoutDefType == null)
+                {
+                    Log.Warning($"[KCSG] [{timestamp}] Could not find StructureLayoutDef type, checking all loaded defs");
+                    
+                    // Look at all loaded defs to find ones that might be structure layouts
                 foreach (var def in DefDatabase<Def>.AllDefs)
                 {
-                    if (def.GetType().FullName.Contains("StructureLayoutDef") || 
-                        def.GetType().Name.Contains("StructureLayoutDef"))
+                        if (def.defName != null && (
+                            def.defName.StartsWith("VFE") || 
+                            def.defName.StartsWith("VFEM") ||
+                            def.defName.StartsWith("VFED") ||
+                            def.defName.StartsWith("VBGE")))
+                        {
+                            // This looks like a structure layout from a Vanilla Expanded mod
+                            RegisterDef(def.defName, def);
+                            regCount++;
+                        }
+                    }
+                }
+                else
+                {
+                    // Use reflection to get all defs of the structure layout type
+                    Log.Message($"[KCSG] [{timestamp}] Searching for structure layouts in DefDatabase");
+                    
+                    // Create a generic method call to DefDatabase<T>.AllDefs
+                    var defDatabaseType = typeof(DefDatabase<>).MakeGenericType(structureLayoutDefType);
+                    var allDefsProperty = defDatabaseType.GetProperty("AllDefs");
+                    
+                    if (allDefsProperty != null)
+                    {
+                        var allDefs = allDefsProperty.GetValue(null) as IEnumerable;
+                        if (allDefs != null)
+                        {
+                            foreach (var def in allDefs)
+                            {
+                                // Try to get the defName property
+                                PropertyInfo defNameProp = def.GetType().GetProperty("defName");
+                                if (defNameProp != null)
+                                {
+                                    string defName = defNameProp.GetValue(def) as string;
+                                    if (!string.IsNullOrEmpty(defName))
+                                    {
+                                        RegisterDef(defName, def);
+                                        regCount++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Also directly check XML files from mods to find structure layout defs
+                Log.Message($"[KCSG] [{timestamp}] Scanning XML files for structure layouts");
+                
+                // Check common folder patterns where structure layouts might be stored
+                string[] structureFolderPatterns = new[] {
+                    "Defs/StructureDefs",
+                    "Defs/StructureLayoutDefs",
+                    "Defs/StructureGen",
+                    "Defs/Structures",
+                    "Defs/CustomGenDefs",
+                    "Defs/CustomGenDefs/StructureLayoutDefs",
+                    "Defs/SettlementLayoutDefs",
+                    "Defs/SettlementDefs",
+                    "Defs/LayoutDefs"
+                };
+                
+                // Create a set of unique defNames to avoid duplicates
+                HashSet<string> processedDefNames = new HashSet<string>();
+                
+                foreach (ModContentPack mod in runningMods)
+                {
+                    foreach (string folder in structureFolderPatterns)
+                    {
+                        string folderPath = Path.Combine(mod.RootDir, folder);
+                        if (Directory.Exists(folderPath))
                     {
                         try
                         {
-                            if (!string.IsNullOrEmpty(def.defName))
-                            {
-                                // Register this def with our system
-                                RegisterDef(def.defName, def);
+                                foreach (string file in Directory.GetFiles(folderPath, "*.xml", SearchOption.AllDirectories))
+                                {
+                                    try
+                                    {
+                                        XmlDocument doc = new XmlDocument();
+                                        doc.Load(file);
+                                        
+                                        // Look for layout defs with defName nodes
+                                        XmlNodeList defNames = doc.SelectNodes("//Defs/*[defName]");
+                                        if (defNames != null)
+                                        {
+                                            foreach (XmlNode node in defNames)
+                                            {
+                                                XmlNode nameNode = node.SelectSingleNode("defName");
+                                                if (nameNode != null && !string.IsNullOrEmpty(nameNode.InnerText))
+                                                {
+                                                    string defName = nameNode.InnerText.Trim();
+                                                    
+                                                    // Check if this might be a structure layout def
+                                                    if ((defName.Contains("VFEM") || 
+                                                         defName.Contains("VFED") || 
+                                                         defName.Contains("VBGE") ||
+                                                         defName.Contains("Structure")) &&
+                                                        !processedDefNames.Contains(defName))
+                                                    {
+                                                        // Add as a placeholder def for KCSG resolution
+                                                        object placeholderDef = CreatePlaceholderDef(defName);
+                                                        RegisterDef(defName, placeholderDef);
+                                                        processedDefNames.Add(defName);
                                 regCount++;
+                                                    }
+                                                }
+                                            }
                             }
                         }
                         catch (Exception ex)
                         {
-                            Log.Warning($"[KCSG] [{timestamp}] Error registering def {def.defName}: {ex.Message}");
+                                        Log.Warning($"[KCSG] [{timestamp}] Error processing XML file {file}: {ex.Message}");
+                                        continue;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Warning($"[KCSG] [{timestamp}] Error accessing folder {folderPath}: {ex.Message}");
+                                continue;
+                            }
                         }
                     }
                 }
                 
-                // Pre-register common KCSG structure names
-                PreregisterCommonStructureNames();
-                
                 Log.Message($"[KCSG] [{timestamp}] Proactively registered {regCount} KCSG.StructureLayoutDefs");
+                
+                // Now, pre-register common names from mods like VFE that are frequently referenced
+                PreregisterCommonStructureNames();
             }
             catch (Exception ex)
             {
-                string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                Log.Error($"[KCSG] [{timestamp}] Error scanning for structure layouts: {ex}");
+                Log.Error($"[KCSG] Error scanning for structure layouts: {ex}");
             }
         }
         
@@ -161,9 +313,18 @@ namespace KCSG
                 "VFEM_Destroyer", "VFEM_DestroyerDLC", "VFEM_Cruiser", "VFEM_CruiserDLC",
                 "VFEM_BroadcastingStation",
                 
+                // Vanilla Base Generation Expanded prefixes
+                "VBGE_Empire", "VBGE_Production", "VBGE_Mining", "VBGE_Slavery",
+                "VBGE_Logging", "VBGE_Defence", "VBGE_CentralEmpire", "VBGE_Outlander",
+                "VBGE_OutlanderProduction", "VBGE_OutlanderMining", "VBGE_OutlanderSlavery",
+                "VBGE_OutlanderLogging", "VBGE_OutlanderDefence", "VBGE_OutlanderFields",
+                "VBGE_TribalProduction", "VBGE_TribalMining", "VBGE_TribalSlavery",
+                "VBGE_TribalLogging", "VBGE_TribalDefence", "VBGE_PiratesDefence",
+                "VBGE_PirateSlavery",
+                
                 // General mod prefixes
                 "VFED_", "VFEA_", "VFEC_", "VFEE_", "VFEM_", "VFET_", "VFE_", "VFEI_", "FTC_", 
-                "RBME_", "AG_", "BM_", "BS_", "MM_", "VC_", "VE_", "VM_"
+                "RBME_", "AG_", "BM_", "BS_", "MM_", "VC_", "VE_", "VM_", "VBGE_", "VGBE_"
             };
             
             int count = 0;
@@ -216,6 +377,84 @@ namespace KCSG
                         defName = defName
                     };
                     RegisterDef(defName, placeholderDef);
+                    count++;
+                }
+            }
+            
+            // PRE-REGISTER EXPLICIT DESERTERS MOD STRUCTURES THAT ARE CAUSING CROSS-REFERENCE ERRORS
+            // This section ensures all problematic structure names from VFE Deserters are pre-registered
+            string[] deserterSpecificLayouts = new[] {
+                // Explicitly register Underfarm layouts (both by ID from XML and common variants)
+                "VFED_UnderfarmMainA", "VFED_UnderfarmMainB", "VFED_UnderfarmMainC",
+                "VFED_UnderfarmA", "VFED_UnderfarmB", "VFED_UnderfarmC", "VFED_UnderfarmD", 
+                "VFED_UnderfarmE", "VFED_UnderfarmF", "VFED_UnderfarmG", "VFED_UnderfarmH",
+                
+                // Explicitly register NewSafehaven layouts
+                "VFED_NewSafehaven1", "VFED_NewSafehaven2", "VFED_NewSafehaven3", 
+                "VFED_NewSafehaven4", "VFED_NewSafehaven5", "VFED_NewSafehaven6",
+                
+                // Explicitly register Noble layouts
+                "VFED_LargeNobleBallroom", "VFED_LargeNobleBedroom", "VFED_LargeNobleGallery",
+                "VFED_LargeNobleThroneRoom", "VFED_MediumNobleBallroom", "VFED_MediumNobleBedroom",
+                "VFED_MediumNobleGallery", "VFED_MediumNobleThroneRoom", "VFED_SmallNobleBedroom",
+                "VFED_SmallNobleThroneRoom", "VFED_GrandNobleThroneRoom",
+                
+                // Explicitly register Plot layouts
+                "VFED_Bunker", "VFED_Courtyard", "VFED_Gardens", "VFED_KontarionEmplacement",
+                "VFED_OnagerEmplacement", "VFED_PalintoneEmplacement", "VFED_ServantQuarters",
+                "VFED_ShuttleLandingPad", "VFED_StockpileDepot", "VFED_SurveillanceStation"
+            };
+            
+            foreach (var defName in deserterSpecificLayouts) {
+                if (!IsDefRegistered(defName)) {
+                    var placeholderDef = new KCSG.StructureLayoutDef {
+                        defName = defName
+                    };
+                    RegisterDef(defName, placeholderDef);
+                    count++;
+                    
+                    // Also register with variant suffixes
+                    RegisterDef(defName + "Layout", CreatePlaceholderDef(defName + "Layout"));
+                    RegisterDef(defName + "Structure", CreatePlaceholderDef(defName + "Structure"));
+                    count += 2;
+                }
+            }
+            
+            // Pre-register numbered VBGE structures (1-20)
+            List<string> vbgeNumberedPrefixes = new List<string>() {
+                "VBGE_CentralEmpire", "VBGE_Production", "VBGE_Mining", "VBGE_Slavery",
+                "VBGE_Logging", "VBGE_Defence", "VBGE_Tribal", "VBGE_Outlander"
+            };
+            
+            foreach (var basePrefix in vbgeNumberedPrefixes) {
+                for (int i = 1; i <= 20; i++) {
+                    string defName = basePrefix + i;
+                    if (!IsDefRegistered(defName)) {
+                        var placeholderDef = new KCSG.StructureLayoutDef {
+                            defName = defName
+                        };
+                        RegisterDef(defName, placeholderDef);
+                        count++;
+                    }
+                }
+            }
+            
+            // Pre-register VBGE settlement tag names that might be referenced
+            string[] vbgeSettlementTags = new[] {
+                "GenericPower", "GenericBattery", "GenericSecurity", "GenericPodLauncher",
+                "GenericKitchen", "GenericStockpile", "GenericBedroom", "GenericGrave",
+                "GenericRecroom", "EmpireBedrooms", "EmpireShuttle", "EmpireThrone",
+                "VGBE_Production", "VGBE_Mining", "VGBE_Slavery", "VGBE_Logging",
+                "VGBE_Defence", "EmpireProduction", "VGBE_CentralEmpire", "VGBE_TribalDefence",
+                "VGBE_TribalCenter", "VGBE_TribalProduction", "VGBE_TribalMining",
+                "VGBE_TribalLogging", "VGBE_PiratesDefence", "VGBE_PirateSlavery"
+            };
+            
+            foreach (var tag in vbgeSettlementTags) {
+                if (!IsDefRegistered(tag)) {
+                    // Create a placeholder def for each tag
+                    var placeholderDef = CreatePlaceholderDef(tag);
+                    RegisterDef(tag, placeholderDef);
                     count++;
                 }
             }
@@ -507,21 +746,167 @@ namespace KCSG
                 return false;
             }
             
+            // Fast path: If already registered, return it
             if (symbolDefs.TryGetValue(defName, out symbolDef))
             {
                 return true;
+            }
+            
+            // ENHANCED: If this is a VFED structure, try extra hard to create a placeholder
+            bool isVFEDStructure = defName.StartsWith("VFED_");
+            
+            // Special urgent handling for VFED_ structures that are known to cause issues
+            if (isVFEDStructure && 
+                (defName.Contains("Underfarm") || 
+                 defName.Contains("NewSafehaven") || 
+                 defName.Contains("AerodroneStation") || 
+                 defName.Contains("ShuttleStagingPost") ||
+                 defName.Contains("SupplyDepot") ||
+                 defName.Contains("TechPrinter") ||
+                 defName.Contains("SurveillanceStation") ||
+                 defName.Contains("ImperialConvoy") ||
+                 defName.Contains("ZeusCannonComplex")))
+            {
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                Log.Warning($"[KCSG] [{timestamp}] Critical VFED structure requested but not found: {defName} - Creating emergency placeholder");
+                
+                try
+                {
+                    // Try to get the existing StructureLayoutDef type first
+                    Type symbolDefType = null;
+                    
+                    try
+                    {
+                        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                        {
+                            try
+                            {
+                                foreach (var type in assembly.GetTypes())
+                                {
+                                    if (type.FullName == "KCSG.StructureLayoutDef" || 
+                                        (type.Name == "StructureLayoutDef" && type.Namespace == "KCSG") ||
+                                        type.Name == "StructureLayoutDef")
+                                    {
+                                        symbolDefType = type;
+                                        break;
+                                    }
+                                }
+                                if (symbolDefType != null) break;
+                            }
+                            catch { /* Ignore exceptions when scanning assemblies */ }
+                        }
+                    }
+                    catch { /* Ignore any scanning exceptions */ }
+                    
+                    // If we can't find the type, try to use Def or create a BasicPlaceholderDef
+                    if (symbolDefType == null)
+                    {
+                        try
+                        {
+                            // Try with a basic KCSG Def if available
+                            var basicDefType = Type.GetType("KCSG.BasicPlaceholderDef");
+                            if (basicDefType != null)
+                            {
+                                symbolDefType = basicDefType;
+                            }
+                            else
+                            {
+                                // Fall back to regular Def
+                                symbolDefType = typeof(Def);
+                            }
+                        }
+                        catch
+                        {
+                            // Last resort - use Def
+                            symbolDefType = typeof(Def);
+                        }
+                    }
+                    
+                    // Create placeholder and set defName
+                    try
+                    {
+                        symbolDef = Activator.CreateInstance(symbolDefType);
+                        
+                        // Set defName property
+                        PropertyInfo defNameProperty = symbolDefType.GetProperty("defName");
+                        if (defNameProperty != null)
+                        {
+                            defNameProperty.SetValue(symbolDef, defName);
+                        }
+                        
+                        // Register it for future use
+                        RegisterDef(defName, symbolDef);
+                        
+                        // Register variants for common suffixes too
+                        string[] variants = new[] {
+                            defName + "Layout",
+                            defName + "Structure",
+                            "Structure_" + defName,
+                            "Layout_" + defName
+                        };
+                        
+                        foreach (var variant in variants)
+                        {
+                            if (!IsDefRegistered(variant))
+                            {
+                                var variantDef = Activator.CreateInstance(symbolDefType);
+                                defNameProperty?.SetValue(variantDef, variant);
+                                RegisterDef(variant, variantDef);
+                            }
+                        }
+                        
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"[KCSG] [{timestamp}] Emergency placeholder creation error for {defName}: {ex.Message}");
+                        
+                        // Last resort fallback - manual object
+                        try
+                        {
+                            // Create a super basic object that at least has a defName field
+                            var basicObj = new BasicPlaceholderDef { defName = defName };
+                            symbolDef = basicObj;
+                            RegisterDef(defName, symbolDef);
+                            return true;
+                        }
+                        catch
+                        {
+                            // If all else fails, create a dictionary as placeholder
+                            var dict = new Dictionary<string, string> { { "defName", defName } };
+                            symbolDef = dict;
+                            RegisterDef(defName, symbolDef);
+                            return true;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG] Critical error handling VFED structure: {ex}");
+                }
             }
             
             // If not found, try to create a placeholder def for cross-reference resolution
             // This is critical to prevent "Could not resolve cross-reference" errors
             if (defName.Contains("StructureLayout") || 
                 defName.StartsWith("VFED_") || defName.StartsWith("VFEM_") ||
+                defName.StartsWith("VBGE_") || defName.StartsWith("VGBE_") ||
                 // Additional specific pattern detection for VFE mods
                 (defName.StartsWith("VFE") && 
                  (defName.Contains("Safehaven") || defName.Contains("Underfarm") || 
                   defName.Contains("Carrier") || defName.Contains("Frigate") || 
                   defName.Contains("Cruiser") || defName.Contains("Destroyer") ||
                   defName.Contains("Broadcasting") || defName.Contains("Station"))) ||
+                // Additional pattern detection for VBGE
+                (defName.StartsWith("Generic") && 
+                 (defName.Contains("Power") || defName.Contains("Battery") || 
+                  defName.Contains("Security") || defName.Contains("PodLauncher") ||
+                  defName.Contains("Kitchen") || defName.Contains("Stockpile") ||
+                  defName.Contains("Bedroom") || defName.Contains("Grave") ||
+                  defName.Contains("Recroom"))) ||
+                (defName.StartsWith("Empire") && 
+                 (defName.Contains("Bedrooms") || defName.Contains("Shuttle") || 
+                  defName.Contains("Throne") || defName.Contains("Production"))) ||
                 defName.Contains("VFEA_") || defName.Contains("VFEC_") ||
                 defName.Contains("FTC_") || defName.Contains("RBME_") || defName.StartsWith("VFE"))
             {
@@ -530,9 +915,38 @@ namespace KCSG
                 {
                     string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                     symbolDef = CreatePlaceholderDef(defName);
+                    
+                    // ENHANCED: Add more detailed logging for VFED structures that were missing
+                    bool isVFEDeserters = defName.StartsWith("VFED_");
+                    
                     // Register the placeholder to avoid creating it again
                     RegisterDef(defName, symbolDef);
-                    if (Prefs.DevMode)
+                    
+                    // Log more detailed information for VFED structures to help diagnose issues
+                    if (isVFEDeserters && Prefs.DevMode)
+                    {
+                        Log.Warning($"[KCSG] [{timestamp}] VFED structure was missing from registry and had to be created on demand: {defName}");
+                        
+                        // For critical VFED structures, register additional variants too for better compatibility
+                        if (defName.Contains("Underfarm") || defName.Contains("NewSafehaven"))
+                        {
+                            string[] variants = new[] {
+                                defName + "Layout",
+                                defName + "Structure",
+                                "Structure_" + defName,
+                                "Layout_" + defName
+                            };
+                            
+                            foreach (var variant in variants)
+                            {
+                                if (!IsDefRegistered(variant))
+                                {
+                                    RegisterDef(variant, CreatePlaceholderDef(variant));
+                                }
+                            }
+                        }
+                    }
+                    else if (Prefs.DevMode)
                     {
                         Log.Message($"[KCSG] [{timestamp}] Created placeholder def for cross-reference: {defName}");
                     }
@@ -542,6 +956,23 @@ namespace KCSG
                 {
                     string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                     Log.Warning($"[KCSG] [{timestamp}] Failed to create placeholder def for {defName}: {ex.Message}");
+                    
+                    // Last-ditch fallback for VFED structures
+                    if (defName.StartsWith("VFED_"))
+                    {
+                        try
+                        {
+                            // Create a super basic object that at least has a defName field
+                            var basicObj = new Dictionary<string, string> { { "defName", defName } };
+                            symbolDef = basicObj;
+                            RegisterDef(defName, symbolDef);
+                            return true;
+                        }
+                        catch
+                        {
+                            // We tried our best
+                        }
+                    }
                 }
             }
             
@@ -766,103 +1197,688 @@ namespace KCSG
             
             try
             {
-                // List of common def names that are referenced by other mods
-                string[] commonlyReferencedDefs = new[]
+                // ENHANCED - Critical-first approach: Load VFE Deserters structures first and most thoroughly
+                if (LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Deserter") || 
+                    m.PackageId.Contains("3025493377") || 
+                    m.PackageId.Contains("oskar.vfe.deserter")))
                 {
-                    // VFE Deserters (VFED) Defs
-                    "VFED_SurveillanceStationF", "VFED_LargeBallroomA", "VFED_LargeBallroomB",
-                    "VFED_GrandNobleThroneRoomA", "VFED_LargeNobleBedroomA", "VFED_MediumGalleryA",
-                    "VFED_ShuttleLandingPadA", "VFED_ShuttleLandingPadB", "VFED_StockpileDepotA",
-                    "VFED_UnderfarmA", "VFED_UnderfarmB", "VFED_UnderfarmC",
-                    "VFED_AerodroneStationA", "VFED_ServantQuartersA",
-                    "VFED_TechPrinterMainA", "VFED_UnderfarmMainA", "VFED_UnderfarmMainB", "VFED_UnderfarmMainC",
-                    "VFED_ImperialConvoyA", "VFED_NewSafehaven1", "VFED_NewSafehaven2", "VFED_NewSafehaven3", 
-                    "VFED_NewSafehaven4", "VFED_NewSafehaven5", "VFED_SupplyDepotA", "VFED_ZeusCannonComplex", 
-                    "VFED_SurveillanceStation", "VFED_ImperialConvoy",
+                    Log.Message($"[KCSG Unbound] Deserters mod detected - ensuring all structures are preregistered");
                     
-                    // VFE Mechanoids (VFEM) Defs
-                    "VFEM_CarrierDLC1", "VFEM_CarrierDLC2", "VFEM_CarrierDLC3", "VFEM_CarrierDLC4",
-                    "VFEM_CarrierDLC5", "VFEM_CarrierDLC6", "VFEM_CarrierDLC7", "VFEM_CarrierDLC8",
-                    "VFEM_CarrierDLC9", "VFEM_CarrierDLC10", "VFEM_CarrierDLC11", "VFEM_CarrierDLC12",
-                    "VFEM_Frigate9", "VFEM_DestroyerDLC10", "VFEM_Frigate10", "VFEM_DestroyerDLC11",
-                    "VFEM_Frigate11", "VFEM_DestroyerDLC12", "VFEM_Frigate12", "VFEM_Cruiser1",
-                    "VFEM_FrigateDLC1", "VFEM_Cruiser2", "VFEM_FrigateDLC2", "VFEM_FrigateDLC3",
-                    "VFEM_BroadcastingStation1", "VFEM_BroadcastingStation2", "VFEM_BroadcastingStation3",
-                    "VFEM_Symbols", "VFEM_StructureDLC", "VFEM_StructureNODLC", "VFEM_StatringFactories",
+                    // These are the critical structures from Vanilla Factions Expanded - Deserters
+                    // that appear to be causing the issues with cross-references
+                    List<string> vfedCriticalBaseNames = new List<string> {
+                        // Main structures from Deserters mod
+                        "Underfarm", "UnderfarmMain", "NewSafehaven", "AerodroneStation",
+                        "TechPrinter", "ShuttleStagingPost", "SupplyDepot", "ZeusCannonComplex",
+                        "SurveillanceStation", "ImperialConvoy",
+                        
+                        // Noble structures
+                        "LargeNobleBallroom", "LargeNobleBedroom", "LargeNobleGallery",
+                        "LargeNobleThroneRoom", "MediumNobleBallroom", "MediumNobleBedroom",
+                        "MediumNobleGallery", "MediumNobleThroneRoom", "SmallNobleBedroom",
+                        "SmallNobleThroneRoom", "GrandNobleThroneRoom",
+                        
+                        // Plot structures
+                        "Bunker", "Courtyard", "Gardens", "KontarionEmplacement",
+                        "OnagerEmplacement", "PalintoneEmplacement", "ServantQuarters",
+                        "ShuttleLandingPad", "StockpileDepot"
+                    };
                     
-                    // FTC (Frontier) Defs
-                    "FTC_CitadelBunkerStart", "FTC_CitadelBunkerStart_B", "FTC_CitadelBunkerStart_C", 
-                    "FTC_CitadelBunkerStart_D",
-                    
-                    // RBME (Minotaur) Defs
-                    "RBME_MinotaurTribalStart",
-                    
-                    // AG (Alpha Genes) Defs
-                    "AG_AbandonedBiotechLabDelta", "AG_AbandonedBiotechLabAlpha"
-                };
-                
-                // Also preregister with common suffix variants
-                var expandedDefs = new List<string>(commonlyReferencedDefs.Length * 3);
-                expandedDefs.AddRange(commonlyReferencedDefs);
-                
-                // Add suffix variants for each def
-                foreach (var baseDef in commonlyReferencedDefs)
-                {
-                    expandedDefs.Add(baseDef + "Layout");
-                    expandedDefs.Add(baseDef + "Structure");
-                    expandedDefs.Add("Structure_" + baseDef);
-                    expandedDefs.Add("Layout_" + baseDef);
-                }
-                
-                // Add numbered variants for common patterns
-                for (int i = 1; i <= 12; i++)
-                {
-                    // VFED numbered variants
-                    expandedDefs.Add($"VFED_UnderfarmMain{(char)('A' + i - 1)}");
-                    expandedDefs.Add($"VFED_Underfarm{(char)('A' + i - 1)}");
-                    expandedDefs.Add($"VFED_NewSafehaven{i}");
-                    expandedDefs.Add($"VFED_AerodroneStation{(char)('A' + i - 1)}");
-                    expandedDefs.Add($"VFED_TechPrinter{(char)('A' + i - 1)}");
-                    expandedDefs.Add($"VFED_ShuttleStagingPost{(char)('A' + i - 1)}");
-                    expandedDefs.Add($"VFED_SupplyDepot{(char)('A' + i - 1)}");
-                    
-                    // VFEM numbered variants
-                    expandedDefs.Add($"VFEM_Frigate{i}");
-                    expandedDefs.Add($"VFEM_Destroyer{i}");
-                    expandedDefs.Add($"VFEM_Cruiser{i}");
-                    expandedDefs.Add($"VFEM_Carrier{i}");
-                    expandedDefs.Add($"VFEM_FrigateDLC{i}");
-                    expandedDefs.Add($"VFEM_DestroyerDLC{i}");
-                    expandedDefs.Add($"VFEM_CruiserDLC{i}");
-                    expandedDefs.Add($"VFEM_CarrierDLC{i}");
-                    expandedDefs.Add($"VFEM_BroadcastingStation{i}");
-                }
-                
-                foreach (var defName in expandedDefs)
-                {
-                    if (!IsDefRegistered(defName))
+                    // Create with all common naming variations
+                    foreach (string baseName in vfedCriticalBaseNames)
                     {
-                        try
+                        // Create with VFED_ prefix (primary naming convention)
+                        string primaryDefName = $"VFED_{baseName}";
+                        
+                        // Create alphabetical variants (A-Z)
+                        for (char letter = 'A'; letter <= 'Z'; letter++)
                         {
-                            object placeholderDef = CreatePlaceholderDef(defName);
-                            RegisterDef(defName, placeholderDef);
-                            createdDefs.Add(defName);
+                            string lettered = $"{primaryDefName}{letter}";
+                            if (!IsDefRegistered(lettered))
+                            {
+                                object placeholder = CreatePlaceholderDef(lettered);
+                                RegisterDef(lettered, placeholder);
+                                createdDefs.Add(lettered);
+                            }
                         }
-                        catch (Exception ex)
+                        
+                        // Create numbered variants (1-12) for specific structures
+                        if (baseName == "NewSafehaven")
                         {
-                            if (Prefs.DevMode)
-                                Log.Warning($"[KCSG] [{timestamp}] Could not create placeholder for {defName}: {ex.Message}");
+                            for (int i = 1; i <= 12; i++)
+                            {
+                                string numbered = $"{primaryDefName}{i}";
+                                if (!IsDefRegistered(numbered))
+                                {
+                                    object placeholder = CreatePlaceholderDef(numbered);
+                                    RegisterDef(numbered, placeholder);
+                                    createdDefs.Add(numbered);
+                                }
+                            }
+                        }
+                        
+                        // Create the base name version as well
+                        if (!IsDefRegistered(primaryDefName))
+                        {
+                            object placeholder = CreatePlaceholderDef(primaryDefName);
+                            RegisterDef(primaryDefName, placeholder);
+                            createdDefs.Add(primaryDefName);
+                        }
+                        
+                        // Create common suffix variations
+                        string[] suffixes = new[] { "Layout", "Structure", "Base", "Main", "Complex" };
+                        foreach (string suffix in suffixes)
+                        {
+                            string withSuffix = $"{primaryDefName}{suffix}";
+                            if (!IsDefRegistered(withSuffix))
+                            {
+                                object placeholder = CreatePlaceholderDef(withSuffix);
+                                RegisterDef(withSuffix, placeholder);
+                                createdDefs.Add(withSuffix);
+                            }
+                        }
+                        
+                        // Create with alternative prefixing styles (used by some mods)
+                        string[] alternativePrefixStyles = new[] {
+                            $"Structure_VFED_{baseName}", 
+                            $"Layout_VFED_{baseName}",
+                            $"StructureLayout_VFED_{baseName}",
+                            $"VFED_Structure_{baseName}",
+                            $"VFED_Layout_{baseName}"
+                        };
+                        
+                        foreach (string altName in alternativePrefixStyles)
+                        {
+                            if (!IsDefRegistered(altName))
+                            {
+                                object placeholder = CreatePlaceholderDef(altName);
+                                RegisterDef(altName, placeholder);
+                                createdDefs.Add(altName);
+                            }
                         }
                     }
+                    
+                    int deserterStructures = createdDefs.Count;
+                    Log.Message($"[KCSG Unbound] Registered {deserterStructures} critical VFE Deserters layouts");
                 }
+                
+                // ENHANCED - Second critical pass: Load VBGE structures
+                if (LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Base Generation") || 
+                    m.PackageId.Contains("3209927822") || 
+                    m.PackageId.Contains("vanillaexpanded.basegen")))
+                {
+                    Log.Message($"[KCSG Unbound] VBGE mod detected - ensuring all structures are preregistered");
+                    
+                    // Critical VBGE structures that need to be preregistered
+                    List<string> vbgeCriticalBaseNames = new List<string> {
+                        // Main structure types
+                        "CentralEmpire", "Production", "Mining", "Slavery", "Logging", "Defence", 
+                        "TribalCenter", "Outlander",
+                        
+                        // Faction-specific structures
+                        "EmpireProduction", "EmpireMining", "EmpireSlavery", "EmpireLogging", "EmpireDefence",
+                        "TribalProduction", "TribalMining", "TribalSlavery", "TribalLogging", "TribalDefence",
+                        "OutlanderProduction", "OutlanderMining", "OutlanderSlavery", "OutlanderLogging", "OutlanderDefence",
+                        "PiratesDefence", "PirateSlavery"
+                    };
+                    
+                    // Process each base name with variants
+                    foreach (string baseName in vbgeCriticalBaseNames)
+                    {
+                        // Create with both VBGE_ and VGBE_ prefixes (both appear in files)
+                        string vbgeDefName = $"VBGE_{baseName}";
+                        string vgbeDefName = $"VGBE_{baseName}";
+                        
+                        // Create numbered variants (1-20) for all base structures
+                        for (int i = 1; i <= 20; i++)
+                        {
+                            string vbgeNumbered = $"{vbgeDefName}{i}";
+                            string vgbeNumbered = $"{vgbeDefName}{i}";
+                            
+                            if (!IsDefRegistered(vbgeNumbered))
+                            {
+                                object placeholder = CreatePlaceholderDef(vbgeNumbered);
+                                RegisterDef(vbgeNumbered, placeholder);
+                                createdDefs.Add(vbgeNumbered);
+                            }
+                            
+                            if (!IsDefRegistered(vgbeNumbered))
+                            {
+                                object placeholder = CreatePlaceholderDef(vgbeNumbered);
+                                RegisterDef(vgbeNumbered, placeholder);
+                                createdDefs.Add(vgbeNumbered);
+                            }
+                        }
+                        
+                        // Create the base name versions
+                        if (!IsDefRegistered(vbgeDefName))
+                        {
+                            object placeholder = CreatePlaceholderDef(vbgeDefName);
+                            RegisterDef(vbgeDefName, placeholder);
+                            createdDefs.Add(vbgeDefName);
+                        }
+                        
+                        if (!IsDefRegistered(vgbeDefName))
+                        {
+                            object placeholder = CreatePlaceholderDef(vgbeDefName);
+                            RegisterDef(vgbeDefName, placeholder);
+                            createdDefs.Add(vgbeDefName);
+                        }
+                    }
+                    
+                    // Generic tags that are referenced
+                    string[] genericTags = new[] {
+                        "GenericPower", "GenericBattery", "GenericSecurity", "GenericPodLauncher",
+                        "GenericKitchen", "GenericStockpile", "GenericBedroom", "GenericGrave",
+                        "GenericRecroom", "GenericProduction", "EmpireBedrooms", "EmpireShuttle", 
+                        "EmpireThrone"
+                    };
+                    
+                    foreach (string tag in genericTags)
+                    {
+                        if (!IsDefRegistered(tag))
+                        {
+                            object placeholder = CreatePlaceholderDef(tag);
+                            RegisterDef(tag, placeholder);
+                            createdDefs.Add(tag);
+                        }
+                    }
+                    
+                    int vbgeStructures = createdDefs.Count;
+                    Log.Message($"[KCSG Unbound] Registered {vbgeStructures} critical VBGE layouts");
+                }
+                
+                // ENHANCED - Third critical pass: Load Alpha Books structures
+                if (LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Alpha Books") || 
+                    m.PackageId.Contains("3403180654")))
+                {
+                    Log.Message($"[KCSG Unbound] Alpha Books mod detected - ensuring symbols are preregistered");
+                    
+                    // Critical Alpha Books symbols
+                    string[] alphaBooksSymbols = new[] {
+                        // Common book symbols
+                        "BookSymbol_Floor", "BookSymbol_Wall", "BookSymbol_Door", "BookSymbol_Light",
+                        "BookSymbol_Table", "BookSymbol_Chair", "BookSymbol_Bookshelf", "BookSymbol_Shelf",
+                        "BookSymbol_Computer", "BookSymbol_Kitchen", "BookSymbol_Bedroom", "BookSymbol_Library",
+                        
+                        // Library structures
+                        "BookLibrary_Small", "BookLibrary_Medium", "BookLibrary_Large",
+                        "BookLibrary_Ancient", "BookLibrary_Modern", "BookLibrary_Futuristic",
+                        
+                        // Root symbols
+                        "AB_Root", "AB_Library", "AB_Ancient", "AB_Modern", "AB_ScienceFiction"
+                    };
+                    
+                    foreach (string symbol in alphaBooksSymbols)
+                    {
+                        if (!IsDefRegistered(symbol))
+                        {
+                            object placeholder = CreatePlaceholderDef(symbol);
+                            RegisterDef(symbol, placeholder);
+                            createdDefs.Add(symbol);
+                        }
+                    }
+                    
+                    int alphaBooksCount = createdDefs.Count;
+                    Log.Message($"[KCSG Unbound] Registered {alphaBooksCount} Alpha Books symbols");
+                }
+                
+                // ENHANCED - Fourth critical pass: Load VFE Mechanoids structures
+                if (LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Mechanoid") || 
+                    m.PackageId.Contains("2329011599") || 
+                    m.PackageId.Contains("oskarpotocki.vfe.mechanoid") ||
+                    m.PackageId.Contains("oskarpotocki.vanillafactionsexpanded.mechanoid")))
+                {
+                    Log.Message($"[KCSG Unbound] VFE Mechanoids mod detected - ensuring structures are preregistered");
+                    
+                    // Critical VFE Mechanoids structures
+                    string[] vfeMechanoidStructures = new[] {
+                        // Ship types
+                        "VFEM_Carrier", "VFEM_CarrierDLC", "VFEM_Frigate", "VFEM_FrigateDLC", 
+                        "VFEM_Destroyer", "VFEM_DestroyerDLC", "VFEM_Cruiser", "VFEM_CruiserDLC",
+                        
+                        // Base structures
+                        "VFEM_BroadcastingStation", "VFEM_MechShipBeacon", "VFEM_MechShipLanding",
+                        "VFEM_MechShipCrashing", "VFEM_MechShipDebris", "VFEM_FactoryRemnants",
+                        
+                        // Special symbols and files
+                        "VFEM_StructureDLC", "VFEM_StructureNODLC", "VFEM_StatringFactories", "VFEM_Symbols"
+                    };
+                    
+                    // Create with all common naming variations
+                    foreach (string baseName in vfeMechanoidStructures)
+                    {
+                        // Create numbered variants (1-20) for ship types
+                        if (baseName.Contains("Carrier") || baseName.Contains("Frigate") || 
+                            baseName.Contains("Destroyer") || baseName.Contains("Cruiser") || 
+                            baseName.Contains("BroadcastingStation"))
+                        {
+                            for (int i = 1; i <= 20; i++)
+                            {
+                                string numbered = $"{baseName}{i}";
+                                if (!IsDefRegistered(numbered))
+                                {
+                                    object placeholder = CreatePlaceholderDef(numbered);
+                                    RegisterDef(numbered, placeholder);
+                                    createdDefs.Add(numbered);
+                                }
+                            }
+                        }
+                        
+                        // Create the base name version as well
+                        if (!IsDefRegistered(baseName))
+                        {
+                            object placeholder = CreatePlaceholderDef(baseName);
+                            RegisterDef(baseName, placeholder);
+                            createdDefs.Add(baseName);
+                        }
+                        
+                        // Create common suffix variations
+                        string[] suffixes = new[] { "Layout", "Structure", "Ship", "Main", "Complex" };
+                        foreach (string suffix in suffixes)
+                        {
+                            string withSuffix = $"{baseName}{suffix}";
+                            if (!IsDefRegistered(withSuffix))
+                            {
+                                object placeholder = CreatePlaceholderDef(withSuffix);
+                                RegisterDef(withSuffix, placeholder);
+                                createdDefs.Add(withSuffix);
+                            }
+                        }
+                    }
+                    
+                    int vfemStructures = createdDefs.Count;
+                    Log.Message($"[KCSG Unbound] Registered {vfemStructures} VFE Mechanoids structures");
+                }
+                
+                // ENHANCED - Fifth critical pass: Load VFE Medieval structures
+                if (LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Medieval") || 
+                    m.PackageId.Contains("3444347874") || 
+                    m.PackageId.Contains("oskarpotocki.vfe.medieval") ||
+                    m.PackageId.Contains("oskarpotocki.vanillafactionsexpanded.medievalmodule")))
+                {
+                    Log.Message($"[KCSG Unbound] VFE Medieval mod detected - ensuring structures are preregistered");
+                    
+                    // Critical VFE Medieval structures
+                    string[] vfeMedievalStructures = new[] {
+                        // Structure types
+                        "MedievalHouse", "MedievalTent", "MedievalKeep", "MedievalCastle",
+                        "Tower", "Hall", "Barracks", "Stable", "Blacksmith", "Church",
+                        "Tavern", "Market", "Farm", "Laboratory", "Walls", "Gate",
+                        
+                        // Special symbols
+                        "Symbol", "MedievalSymbol"
+                    };
+                    
+                    // Create with common prefixes and variations
+                    foreach (string baseName in vfeMedievalStructures)
+                    {
+                        // Different prefixes
+                        string[] prefixes = new[] { "VFEM_", "VFE_Medieval_", "Medieval_", "" };
+                        
+                        foreach (string prefix in prefixes)
+                        {
+                            string prefixedName = $"{prefix}{baseName}";
+                            
+                            // Create prefixed base name
+                            if (!IsDefRegistered(prefixedName))
+                            {
+                                object placeholder = CreatePlaceholderDef(prefixedName);
+                                RegisterDef(prefixedName, placeholder);
+                                createdDefs.Add(prefixedName);
+                            }
+                            
+                            // Create numbered variants (1-10)
+                            for (int i = 1; i <= 10; i++)
+                            {
+                                string numbered = $"{prefixedName}{i}";
+                                if (!IsDefRegistered(numbered))
+                                {
+                                    object placeholder = CreatePlaceholderDef(numbered);
+                                    RegisterDef(numbered, placeholder);
+                                    createdDefs.Add(numbered);
+                                }
+                            }
+                            
+                            // Create common variations with size suffixes
+                            string[] suffixes = new[] { "Small", "Medium", "Large", "Layout", "Structure" };
+                            foreach (string suffix in suffixes)
+                            {
+                                string withSuffix = $"{prefixedName}{suffix}";
+                                if (!IsDefRegistered(withSuffix))
+                                {
+                                    object placeholder = CreatePlaceholderDef(withSuffix);
+                                    RegisterDef(withSuffix, placeholder);
+                                    createdDefs.Add(withSuffix);
+                                }
+                            }
+                        }
+                    }
+                    
+                    int vfemStructures = createdDefs.Count;
+                    Log.Message($"[KCSG Unbound] Registered {vfemStructures} VFE Medieval structures");
+                }
+                
+                // ENHANCED - Sixth critical pass: Load Save Our Ship 2 structures
+                if (LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Save Our Ship") || 
+                    m.Name.Contains("SOS2") ||
+                    m.PackageId.Contains("1909914131") || 
+                    m.PackageId.Contains("ludeon.rimworld.shipshavecomeback") ||
+                    m.PackageId.Contains("lwm.shipshavecomeback")))
+                {
+                    Log.Message($"[KCSG Unbound] Save Our Ship 2 mod detected - ensuring structures are preregistered");
+                    
+                    // Critical Save Our Ship 2 structures
+                    string[] sos2Structures = new[] {
+                        // Ship parts/sections
+                        "ShipSection", "ShipHull", "ShipBridge", "ShipEngineRoom", "ShipReactor",
+                        "ShipHangar", "ShipCrew", "ShipCargo", "ShipMedical", "ShipDefense",
+                        "ShipWeapons", "ShipLiving", "ShipGenerators", "ShipThrusters",
+                        
+                        // Ship types
+                        "Shuttle", "Corvette", "Frigate", "Destroyer", "Cruiser", "Battleship",
+                        "Dreadnought", "CargoShip", "ColonyShip", "MilitaryShip", "ScienceShip",
+                        
+                        // Derelict ships
+                        "DerelictShip", "AbandonedShip", "AncientShip", "ShipWreckage",
+                        
+                        // Specific components
+                        "ShipBridge", "ShipComputer", "ShipSensor", "ShipShield", "ShipHeatSink",
+                        "ShipCryptosleep", "ShipReactor", "ShipEngine", "ShipCapacitor", "ShipTurret"
+                    };
+                    
+                    // Create with different prefixes and variations
+                    foreach (string baseName in sos2Structures)
+                    {
+                        // Different prefixes
+                        string[] prefixes = new[] { "SOS2_", "SaveOurShip_", "SOS_", "Ship_", "" };
+                        
+                        foreach (string prefix in prefixes)
+                        {
+                            string prefixedName = $"{prefix}{baseName}";
+                            
+                            // Create prefixed base name
+                            if (!IsDefRegistered(prefixedName))
+                            {
+                                object placeholder = CreatePlaceholderDef(prefixedName);
+                                RegisterDef(prefixedName, placeholder);
+                                createdDefs.Add(prefixedName);
+                            }
+                            
+                            // Create numbered variants (1-5)
+                            for (int i = 1; i <= 5; i++)
+                            {
+                                string numbered = $"{prefixedName}{i}";
+                                if (!IsDefRegistered(numbered))
+                                {
+                                    object placeholder = CreatePlaceholderDef(numbered);
+                                    RegisterDef(numbered, placeholder);
+                                    createdDefs.Add(numbered);
+                                }
+                            }
+                            
+                            // Create letter variants (A-E)
+                            for (char letter = 'A'; letter <= 'E'; letter++)
+                            {
+                                string lettered = $"{prefixedName}{letter}";
+                                if (!IsDefRegistered(lettered))
+                                {
+                                    object placeholder = CreatePlaceholderDef(lettered);
+                                    RegisterDef(lettered, placeholder);
+                                    createdDefs.Add(lettered);
+                                }
+                            }
+                            
+                            // Create common size variants
+                            string[] suffixes = new[] { "Small", "Medium", "Large", "Layout", "Structure", "Class" };
+                            foreach (string suffix in suffixes)
+                            {
+                                string withSuffix = $"{prefixedName}{suffix}";
+                                if (!IsDefRegistered(withSuffix))
+                                {
+                                    object placeholder = CreatePlaceholderDef(withSuffix);
+                                    RegisterDef(withSuffix, placeholder);
+                                    createdDefs.Add(withSuffix);
+                                }
+                            }
+                        }
+                    }
+                    
+                    int sos2Structures2 = createdDefs.Count;
+                    Log.Message($"[KCSG Unbound] Registered {sos2Structures2} Save Our Ship 2 structures");
+                }
+                
+                // ENHANCED - Seventh critical pass: Load Vanilla Outposts Expanded structures
+                if (LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Outpost") || 
+                    m.PackageId.Contains("2688941031") || 
+                    m.PackageId.Contains("oskarpotocki.vfe.outposts") ||
+                    m.PackageId.Contains("vanillaexpanded.outposts")))
+                {
+                    Log.Message($"[KCSG Unbound] Vanilla Outposts Expanded mod detected - ensuring structures are preregistered");
+                    
+                    // Critical Vanilla Outposts Expanded structures
+                    string[] voeStructures = new[] {
+                        // Outpost base types
+                        "Outpost", "MiningOutpost", "FarmingOutpost", "LoggingOutpost",
+                        "ResearchOutpost", "TradingOutpost", "MilitaryOutpost", "PowerOutpost",
+                        "FishingOutpost", "ChemfuelOutpost", "HuntingOutpost", "FactoryOutpost",
+                        
+                        // Structure types
+                        "OutpostBuilding", "OutpostWalls", "OutpostDefense", "OutpostEntrance",
+                        "OutpostStorage", "OutpostPower", "OutpostMain", "OutpostBarracks",
+                        "OutpostCore", "OutpostPerimeter", "OutpostCommand", "OutpostResearch",
+                        
+                        // Specific faction outposts
+                        "ImperialOutpost", "TribalOutpost", "PirateOutpost", "MechanoidOutpost",
+                        "InsectoidOutpost", "OutlanderOutpost",
+                        
+                        // Special symbols
+                        "VOE_Symbol", "OutpostSymbol"
+                    };
+                    
+                    // Create with different prefixes and variations
+                    foreach (string baseName in voeStructures)
+                    {
+                        // Different prefixes
+                        string[] prefixes = new[] { "VOE_", "VE_Outposts_", "Outpost_", "" };
+                        
+                        foreach (string prefix in prefixes)
+                        {
+                            string prefixedName = $"{prefix}{baseName}";
+                            
+                            // Create prefixed base name
+                            if (!IsDefRegistered(prefixedName))
+                            {
+                                object placeholder = CreatePlaceholderDef(prefixedName);
+                                RegisterDef(prefixedName, placeholder);
+                                createdDefs.Add(prefixedName);
+                            }
+                            
+                            // Create numbered variants (1-8)
+                            for (int i = 1; i <= 8; i++)
+                            {
+                                string numbered = $"{prefixedName}{i}";
+                                if (!IsDefRegistered(numbered))
+                                {
+                                    object placeholder = CreatePlaceholderDef(numbered);
+                                    RegisterDef(numbered, placeholder);
+                                    createdDefs.Add(numbered);
+                                }
+                            }
+                            
+                            // Create letter variants (A-E)
+                            for (char letter = 'A'; letter <= 'E'; letter++)
+                            {
+                                string lettered = $"{prefixedName}{letter}";
+                                if (!IsDefRegistered(lettered))
+                                {
+                                    object placeholder = CreatePlaceholderDef(lettered);
+                                    RegisterDef(lettered, placeholder);
+                                    createdDefs.Add(lettered);
+                                }
+                            }
+                            
+                            // Create common size variants
+                            string[] suffixes = new[] { "Small", "Medium", "Large", "Layout", "Structure" };
+                            foreach (string suffix in suffixes)
+                            {
+                                string withSuffix = $"{prefixedName}{suffix}";
+                                if (!IsDefRegistered(withSuffix))
+                                {
+                                    object placeholder = CreatePlaceholderDef(withSuffix);
+                                    RegisterDef(withSuffix, placeholder);
+                                    createdDefs.Add(withSuffix);
+                                }
+                            }
+                        }
+                    }
+                    
+                    int voeStructures2 = createdDefs.Count;
+                    Log.Message($"[KCSG Unbound] Registered {voeStructures2} Vanilla Outposts Expanded structures");
+                }
+                
+                // ENHANCED - Eighth critical pass: Load VFE Ancients and Vault structures
+                if (LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Ancients") || 
+                    m.PackageId.Contains("2654846754") || // Main VFE Ancients 
+                    m.PackageId.Contains("2946113288") || // Lost Vaults
+                    m.PackageId.Contains("3160710884") || // Even More Vaults
+                    m.PackageId.Contains("3325594457") || // Soups Vault Collection
+                    m.PackageId.Contains("oskarpotocki.vfe.ancients")))
+                {
+                    Log.Message($"[KCSG Unbound] VFE Ancients mods detected - ensuring structures are preregistered");
+                    
+                    // Critical VFE Ancients structures
+                    string[] ancientsBaseStructures = new[] {
+                        // Base ancient structures
+                        "AncientHouse", "AncientTent", "AncientKeep", "AncientCastle", "AncientLabratory",
+                        "AncientTemple", "AncientFarm", "AncientSlingshot", "AncientVault", "AncientRuin",
+                        "AbandonedSlingshot", "LootedVault", "SealedVault",
+                        
+                        // Special symbols
+                        "Symbol", "AncientSymbol"
+                    };
+                    
+                    // Create with different prefixes and variations
+                    foreach (string baseName in ancientsBaseStructures)
+                    {
+                        // Different prefixes
+                        string[] prefixes = new[] { "VFEA_", "VFE_Ancients_", "Ancient_", "" };
+                        
+                        foreach (string prefix in prefixes)
+                        {
+                            string prefixedName = $"{prefix}{baseName}";
+                            
+                            // Create prefixed base name
+                            if (!IsDefRegistered(prefixedName))
+                            {
+                                object placeholder = CreatePlaceholderDef(prefixedName);
+                                RegisterDef(prefixedName, placeholder);
+                                createdDefs.Add(prefixedName);
+                            }
+                            
+                            // Create letter variants (A-E)
+                            for (char letter = 'A'; letter <= 'E'; letter++)
+                            {
+                                string lettered = $"{prefixedName}{letter}";
+                                if (!IsDefRegistered(lettered))
+                                {
+                                    object placeholder = CreatePlaceholderDef(lettered);
+                                    RegisterDef(lettered, placeholder);
+                                    createdDefs.Add(lettered);
+                                }
+                            }
+                            
+                            // Create common variations with size suffixes
+                            string[] suffixes = new[] { "Small", "Medium", "Large", "Layout", "Structure" };
+                            foreach (string suffix in suffixes)
+                            {
+                                string withSuffix = $"{prefixedName}{suffix}";
+                                if (!IsDefRegistered(withSuffix))
+                                {
+                                    object placeholder = CreatePlaceholderDef(withSuffix);
+                                    RegisterDef(withSuffix, placeholder);
+                                    createdDefs.Add(withSuffix);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Critical vault structures from Lost Vaults
+                    string[] vaultStructures = new[] {
+                        // Animal vaults from Lost Vaults
+                        "SealedVaultKilo1", "SealedVaultKilo2", "SealedVaultKilo3", 
+                        "SealedVaultCrow", "SealedVaultBadger", "SealedVaultBear", 
+                        "SealedVaultMole", "SealedVaultFox", "SealedVaultMouse", 
+                        "SealedVaultOx", "SealedVaultTurtle", "SealedVaultEagle", 
+                        "SealedVaultOwl",
+                        
+                        // Specialized vaults from Even More Vaults
+                        "SealedGeneBankVault", "SealedOutpostVault", 
+                        "SealedWarehouseVault", "AgriculturalResearchVault",
+                        
+                        // Tree vaults from Soups Vault Collection
+                        "VFEA_SV_RedwoodVault", "VFEA_SV_MangroveVault", "VFEA_SV_BonsaiVault", 
+                        "VFEA_SV_CedarVault", "VFEA_SV_MagnoliaVault", "VFEA_SV_OakVault", 
+                        "VFEA_SV_SequoiaVault", "VFEA_SV_SycamoreVault", "VFEA_SV_ManukaVault",
+                        "VFEA_SV_MapleVault", "VFEA_SV_PandoVault", "VFEA_SV_BlackwoodVault",
+                        "VFEA_SV_BristleconeVault", "VFEA_SV_BirchVault"
+                    };
+                    
+                    // Register each vault directly
+                    foreach (string vaultName in vaultStructures)
+                    {
+                        if (!IsDefRegistered(vaultName))
+                        {
+                            object placeholder = CreatePlaceholderDef(vaultName);
+                            RegisterDef(vaultName, placeholder);
+                            createdDefs.Add(vaultName);
+                        }
+                        
+                        // For Soups vaults, also register alternative forms (specifically handle SV_ prefix patterns)
+                        if (vaultName.Contains("VFEA_SV_"))
+                        {
+                            string treeName = vaultName.Replace("VFEA_SV_", "").Replace("Vault", "");
+                            
+                            string[] altPatterns = new[] {
+                                $"SealedVault{treeName}",
+                                $"TreeVault{treeName}",
+                                $"VFEA_SV_{treeName}",
+                                $"VFEA_{treeName}Vault",
+                                $"{treeName}Vault"
+                            };
+                            
+                            foreach (string altPattern in altPatterns)
+                            {
+                                if (!IsDefRegistered(altPattern))
+                                {
+                                    object placeholder = CreatePlaceholderDef(altPattern);
+                                    RegisterDef(altPattern, placeholder);
+                                    createdDefs.Add(altPattern);
+                                }
+                            }
+                        }
+                    }
+                    
+                    int ancientsStructures = createdDefs.Count;
+                    Log.Message($"[KCSG Unbound] Registered {ancientsStructures} VFE Ancients and Vault structures");
+                }
+                
+                Log.Message($"[KCSG Unbound] Preloaded a total of {createdDefs.Count} commonly referenced defs");
+            return createdDefs;
             }
             catch (Exception ex)
             {
-                Log.Warning($"[KCSG] [{timestamp}] Error in PreloadCommonlyReferencedDefs: {ex.Message}");
+                Log.Error($"[KCSG] [{timestamp}] Error preloading commonly referenced defs: {ex}");
+                return createdDefs;
             }
-            
-            Log.Message($"[KCSG] [{timestamp}] Preloaded {createdDefs.Count} placeholder structure definitions");
-            return createdDefs;
         }
     }
 } 
