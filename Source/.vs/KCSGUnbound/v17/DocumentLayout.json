@@ -3,12 +3,16 @@
   "WorkspaceRootPath": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|d:\\games \u0026 programs\\steam\\steamapps\\common\\rimworld\\mods\\kcsg unbound\\source\\obj\\debug\\.netframework,version=v4.8.assemblyattributes.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|solutionrelative:obj\\debug\\.netframework,version=v4.8.assemblyattributes.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|d:\\games \u0026 programs\\steam\\steamapps\\common\\rimworld\\mods\\kcsg unbound\\source\\symboldefmonitor.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|solutionrelative:symboldefmonitor.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|d:\\games \u0026 programs\\steam\\steamapps\\common\\rimworld\\mods\\kcsg unbound\\source\\harmonypatches.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|solutionrelative:harmonypatches.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|d:\\games \u0026 programs\\steam\\steamapps\\common\\rimworld\\mods\\kcsg unbound\\source\\obj\\debug\\.netframework,version=v4.8.assemblyattributes.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|solutionrelative:obj\\debug\\.netframework,version=v4.8.assemblyattributes.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|d:\\games \u0026 programs\\steam\\steamapps\\common\\rimworld\\mods\\kcsg unbound\\source\\tileutils.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -59,10 +63,6 @@
       "RelativeMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|solutionrelative:kcsg.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|d:\\games \u0026 programs\\steam\\steamapps\\common\\rimworld\\mods\\kcsg unbound\\source\\harmonypatches.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|solutionrelative:harmonypatches.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|d:\\games \u0026 programs\\steam\\steamapps\\common\\rimworld\\mods\\kcsg unbound\\source\\genoption.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{09FA08A7-9665-40A2-9F37-98E3E80B4C1F}|KCSGUnboundCore.csproj|solutionrelative:genoption.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
@@ -106,11 +106,11 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": 4,
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 2,
               "Title": ".NETFramework,Version=v4.8.AssemblyAttributes.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\obj\\Debug\\.NETFramework,Version=v4.8.AssemblyAttributes.cs",
               "RelativeDocumentMoniker": "obj\\Debug\\.NETFramework,Version=v4.8.AssemblyAttributes.cs",
@@ -123,20 +123,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
-              "Title": "TileUtils.cs",
-              "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\TileUtils.cs",
-              "RelativeDocumentMoniker": "TileUtils.cs",
-              "ToolTip": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\TileUtils.cs",
-              "RelativeToolTip": "TileUtils.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:25.654Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 4,
               "Title": "TiledStructureDef.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\TiledStructureDef.cs",
               "RelativeDocumentMoniker": "TiledStructureDef.cs",
@@ -144,12 +131,11 @@
               "RelativeToolTip": "TiledStructureDef.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:24.71Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:24.71Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 4,
+              "DocumentIndex": 5,
               "Title": "SymbolResolver_KCSG.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\SymbolResolver_KCSG.cs",
               "RelativeDocumentMoniker": "SymbolResolver_KCSG.cs",
@@ -157,12 +143,11 @@
               "RelativeToolTip": "SymbolResolver_KCSG.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:23.864Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:23.864Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
+              "DocumentIndex": 6,
               "Title": "SymbolRegistry.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\SymbolRegistry.cs",
               "RelativeDocumentMoniker": "SymbolRegistry.cs",
@@ -170,25 +155,24 @@
               "RelativeToolTip": "SymbolRegistry.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:23.168Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:23.168Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 0,
               "Title": "SymbolDefMonitor.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\SymbolDefMonitor.cs",
               "RelativeDocumentMoniker": "SymbolDefMonitor.cs",
               "ToolTip": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\SymbolDefMonitor.cs",
               "RelativeToolTip": "SymbolDefMonitor.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAOkBAAAAAAAAAAAewPwBAAAvAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2025-05-11T11:49:22.536Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
+              "DocumentIndex": 7,
               "Title": "StructureLayoutDef.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\StructureLayoutDef.cs",
               "RelativeDocumentMoniker": "StructureLayoutDef.cs",
@@ -196,12 +180,11 @@
               "RelativeToolTip": "StructureLayoutDef.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:21.92Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:21.92Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 7,
+              "DocumentIndex": 8,
               "Title": "SettlementLayoutDef.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\SettlementLayoutDef.cs",
               "RelativeDocumentMoniker": "SettlementLayoutDef.cs",
@@ -209,12 +192,36 @@
               "RelativeToolTip": "SettlementLayoutDef.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:21.33Z",
+              "WhenOpened": "2025-05-11T11:49:21.33Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "HarmonyPatches.cs",
+              "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\HarmonyPatches.cs",
+              "RelativeDocumentMoniker": "HarmonyPatches.cs",
+              "ToolTip": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\HarmonyPatches.cs",
+              "RelativeToolTip": "HarmonyPatches.cs",
+              "ViewState": "AgIAAGUBAAAAAAAAAAAewHoBAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-05-11T11:49:15.865Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 8,
+              "DocumentIndex": 3,
+              "Title": "TileUtils.cs",
+              "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\TileUtils.cs",
+              "RelativeDocumentMoniker": "TileUtils.cs",
+              "ToolTip": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\TileUtils.cs",
+              "RelativeToolTip": "TileUtils.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-05-11T11:49:25.654Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
               "Title": "ResolveParamsExtensions.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\ResolveParamsExtensions.cs",
               "RelativeDocumentMoniker": "ResolveParamsExtensions.cs",
@@ -222,12 +229,11 @@
               "RelativeToolTip": "ResolveParamsExtensions.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:20.754Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:20.754Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 9,
+              "DocumentIndex": 10,
               "Title": "RandomUtils.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\RandomUtils.cs",
               "RelativeDocumentMoniker": "RandomUtils.cs",
@@ -235,12 +241,11 @@
               "RelativeToolTip": "RandomUtils.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:19.588Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:19.588Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 10,
+              "DocumentIndex": 11,
               "Title": "LayoutUtils.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\LayoutUtils.cs",
               "RelativeDocumentMoniker": "LayoutUtils.cs",
@@ -248,12 +253,11 @@
               "RelativeToolTip": "LayoutUtils.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:18.886Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:18.886Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 11,
+              "DocumentIndex": 12,
               "Title": "KCSGUnboundMod.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\KCSGUnboundMod.cs",
               "RelativeDocumentMoniker": "KCSGUnboundMod.cs",
@@ -261,12 +265,11 @@
               "RelativeToolTip": "KCSGUnboundMod.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:17.094Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:17.094Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 12,
+              "DocumentIndex": 13,
               "Title": "KCSG_Init.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\KCSG_Init.cs",
               "RelativeDocumentMoniker": "KCSG_Init.cs",
@@ -274,12 +277,11 @@
               "RelativeToolTip": "KCSG_Init.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:17.511Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:17.511Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 13,
+              "DocumentIndex": 14,
               "Title": "KCSG.cs",
               "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\KCSG.cs",
               "RelativeDocumentMoniker": "KCSG.cs",
@@ -287,21 +289,7 @@
               "RelativeToolTip": "KCSG.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:16.393Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 14,
-              "Title": "HarmonyPatches.cs",
-              "DocumentMoniker": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\HarmonyPatches.cs",
-              "RelativeDocumentMoniker": "HarmonyPatches.cs",
-              "ToolTip": "D:\\Games \u0026 Programs\\Steam\\steamapps\\common\\RimWorld\\Mods\\KCSG Unbound\\Source\\HarmonyPatches.cs",
-              "RelativeToolTip": "HarmonyPatches.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:15.865Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:16.393Z"
             },
             {
               "$type": "Document",
@@ -313,8 +301,7 @@
               "RelativeToolTip": "GenOption.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:15.293Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:15.293Z"
             },
             {
               "$type": "Document",
@@ -326,8 +313,7 @@
               "RelativeToolTip": "Debug.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:14.718Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:14.718Z"
             },
             {
               "$type": "Document",
@@ -339,8 +325,7 @@
               "RelativeToolTip": "CustomGenOption.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:14.212Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:14.212Z"
             },
             {
               "$type": "Document",
@@ -352,8 +337,7 @@
               "RelativeToolTip": "Utility\\VEFIntegration.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:12.938Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:12.938Z"
             },
             {
               "$type": "Document",
@@ -365,8 +349,7 @@
               "RelativeToolTip": "Utility\\RimWorldCompatibility.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:12.366Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:12.366Z"
             },
             {
               "$type": "Document",
@@ -378,8 +361,7 @@
               "RelativeToolTip": "Utility\\RenderingDetector.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:11.819Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:11.819Z"
             },
             {
               "$type": "Document",
@@ -391,8 +373,7 @@
               "RelativeToolTip": "Utility\\ReflectionCache.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:11.261Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:11.261Z"
             },
             {
               "$type": "Document",
@@ -404,8 +385,7 @@
               "RelativeToolTip": "Resolvers\\SymbolResolver_Building.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:10.456Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:10.456Z"
             },
             {
               "$type": "Document",
@@ -417,8 +397,7 @@
               "RelativeToolTip": "Properties\\AssemblyInfo.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-05-11T11:49:04.907Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-05-11T11:49:04.907Z"
             }
           ]
         }

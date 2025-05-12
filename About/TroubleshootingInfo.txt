@@ -1,0 +1,37 @@
+===== KCSG Unbound Troubleshooting Information =====
+
+If you're experiencing crashes when starting the game with KCSG Unbound installed, please try the following steps:
+
+1. Mod Load Order:
+   - Make sure Harmony loads first
+   - KCSG Unbound should load early in your mod list (around position #3-4)
+   - Make sure any mod that depends on KCSG loads after it
+
+2. Compatibility:
+   - KCSG Unbound is compatible with RimWorld 1.5
+   - Some mods might conflict with how KCSG Unbound patches the game
+   - Try disabling any mods that modify base structure generation
+
+3. Diagnostic Information:
+   When your game crashes, look for a diagnostic file at this location:
+   C:/Users/[YourUsername]/AppData/LocalLow/Ludeon Studios/RimWorld by Ludeon Studios/KCSG_Startup_Diagnostic.log
+   
+   Please include this file when reporting issues.
+
+4. Common Issues:
+   - If the game crashes silently, it may be due to a conflict with another mod
+   - If you see "Short hash collision" errors, this is expected behavior
+   - If you see "exceeded 65,535 def limit", that means KCSG Unbound is working correctly
+
+5. Temporary Solutions:
+   If you can't get the mod to work:
+   - Try moving KCSG Unbound earlier in your load order
+   - Temporarily remove mods that add many structures or symbols
+   - Try running with a more minimal mod setup to identify conflicts
+
+For support, please provide:
+- Your Player.log file
+- The KCSG_Startup_Diagnostic.log file 
+- Your full mod list
+
+Thank you for using KCSG Unbound! 

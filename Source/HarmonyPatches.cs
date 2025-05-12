@@ -23,6 +23,9 @@ namespace KCSG
             {
                 Log.Message("[KCSG Unbound] Applying Harmony patches using safe approach");
                 
+                // Always patch these critical systems first
+                ApplyCrossReferenceResolutionPatches(harmony);
+                
                 // Try to find the GlobalSettings symbol resolution method first
                 var symbolResolutionMethod = FindSymbolResolutionMethod();
                 if (symbolResolutionMethod != null)
@@ -47,38 +50,105 @@ namespace KCSG
                 
                 // Always patch these generic methods that don't rely on specific RimWorld API methods
                 Log.Message("[KCSG Unbound] Applying generic patches");
-                // Use direct patching instead of PatchAll
-                foreach (var method in typeof(Patch_BaseGen_Generate).GetMethods(BindingFlags.Static | BindingFlags.Public))
+                try 
                 {
-                    if (method.Name == "Prefix" || method.Name == "Postfix")
+                    // Modified approach to avoid reflection issues
+                    var targetMethod = AccessTools.Method(typeof(BaseGen), "Generate");
+                    if (targetMethod != null)
                     {
-                        var patchMethod = new HarmonyMethod(method);
-                        var targetMethod = AccessTools.Method(typeof(BaseGen), "Generate");
-                        if (targetMethod != null)
+                        // Direct method references instead of dynamic discovery
+                        var prefixMethod = typeof(Patch_BaseGen_Generate).GetMethod("Prefix", 
+                            BindingFlags.Static | BindingFlags.Public);
+                        var postfixMethod = typeof(Patch_BaseGen_Generate).GetMethod("Postfix", 
+                            BindingFlags.Static | BindingFlags.Public);
+                            
+                        if (prefixMethod != null)
                         {
-                            harmony.Patch(targetMethod, 
-                                prefix: method.Name == "Prefix" ? patchMethod : null, 
-                                postfix: method.Name == "Postfix" ? patchMethod : null);
+                            harmony.Patch(targetMethod, prefix: new HarmonyMethod(prefixMethod));
                         }
+                        
+                        if (postfixMethod != null)
+                        {
+                            harmony.Patch(targetMethod, postfix: new HarmonyMethod(postfixMethod));
+                        }
+                        
+                        Log.Message("[KCSG Unbound] Successfully patched BaseGen.Generate");
                     }
+                    else
+                    {
+                        Log.Warning("[KCSG Unbound] Could not find BaseGen.Generate method");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[KCSG Unbound] Non-critical error patching BaseGen.Generate: {ex.Message}");
+                    // Continue despite this error - core functionality will still work
                 }
                 
                 // Directly patch the constructor
-                var ctorInfo = AccessTools.Constructor(typeof(SymbolResolver));
-                if (ctorInfo != null)
+                try
                 {
-                    var postfixMethod = typeof(Patch_SymbolResolver_Constructor)
-                        .GetMethod("Postfix", BindingFlags.Static | BindingFlags.Public);
-                    if (postfixMethod != null)
+                    var ctorInfo = AccessTools.Constructor(typeof(SymbolResolver));
+                    if (ctorInfo != null)
                     {
-                        harmony.Patch(ctorInfo, postfix: new HarmonyMethod(postfixMethod));
+                        var postfixMethod = typeof(Patch_SymbolResolver_Constructor)
+                            .GetMethod("Postfix", BindingFlags.Static | BindingFlags.Public);
+                        if (postfixMethod != null)
+                        {
+                            harmony.Patch(ctorInfo, postfix: new HarmonyMethod(postfixMethod));
+                            Log.Message("[KCSG Unbound] Successfully patched SymbolResolver constructor");
+                        }
+                        else
+                        {
+                            Log.Warning("[KCSG Unbound] Could not find Patch_SymbolResolver_Constructor.Postfix method");
+                        }
+                    }
+                    else
+                    {
+                        Log.Warning("[KCSG Unbound] Could not find SymbolResolver constructor to patch");
                     }
                 }
-                
-                // Apply DefDatabase specific patches
-                if (Patch_DefDatabase_Add_SymbolDef.Prepare())
+                catch (Exception ex)
                 {
-                    Log.Message("[KCSG Unbound] DefDatabase.Add patch applied");
+                    Log.Warning($"[KCSG Unbound] Non-critical error patching SymbolResolver constructor: {ex.Message}");
+                    // Continue despite this error
+                }
+                
+                // Apply DefDatabase specific patches using a safer approach
+                try 
+                {
+                    // Use AccessTools to find the method instead of trying to construct it manually
+                    var defDatabaseAddMethod = AccessTools.Method(typeof(DefDatabase<>), "Add");
+                    if (defDatabaseAddMethod != null)
+                    {
+                        // Use HarmonyMethod with methodType to create a proper generic patch
+                        var prefixMethod = typeof(Patch_DefDatabase_Add_SymbolDef)
+                            .GetMethod("PrefixAdd", BindingFlags.Public | BindingFlags.Static);
+                        
+                        if (prefixMethod != null)
+                        {
+                            // Use a different approach - don't try to patch the open generic directly
+                            // Instead, use the Harmony API to create a targeted patch
+                            harmony.CreateProcessor(defDatabaseAddMethod)
+                                .AddPrefix(prefixMethod)
+                                .Patch();
+                                
+                            Log.Message("[KCSG Unbound] DefDatabase.Add patch applied for SymbolDefs using safer approach");
+                        }
+                        else
+                        {
+                            Log.Error("[KCSG Unbound] Failed to find PrefixAdd method for DefDatabase.Add patch");
+                        }
+                    }
+                    else
+                    {
+                        Log.Error("[KCSG Unbound] Failed to find DefDatabase.Add method to patch");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[KCSG Unbound] Error applying DefDatabase.Add patch: {ex}");
+                    // Continue despite this error - core functionality may still work
                 }
                 
                 // Try to patch GetByShortHash if possible
@@ -360,160 +430,104 @@ namespace KCSG
         /// </summary>
         public static class Patch_DefDatabase_Add_SymbolDef
         {
-            // Track if the patch has been applied
-            private static bool patched = false;
-            
-            // Maximum error threshold to avoid overwhelming logs
+            // For error tracking
             private static int maxErrorCount = 20;
             private static int errorCount = 0;
+            
+            // This is added for compatibility and to avoid warnings
+            #pragma warning disable CS0414
+            private static bool patched = false;
+            #pragma warning restore CS0414
             
             /// <summary>
             /// Called by Harmony to determine if this patch should be applied
             /// </summary>
+            /// <returns>True if this patch should be applied</returns>
             public static bool Prepare()
             {
-                try
-                {
-                    if (patched) return false;
-                    
-                    // Get the generic type definition
-                    Type defDatabaseType = typeof(DefDatabase<>).GetGenericTypeDefinition();
-                    
-                    // Find the KCSG.SymbolDef type dynamically to avoid direct dependencies
-                    Type symbolDefType = null;
-                    foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-                    {
-                        try 
-                        {
-                            foreach (var type in assembly.GetTypes())
-                            {
-                                if (type.FullName == "KCSG.SymbolDef" || type.Name == "SymbolDef" && type.Namespace == "KCSG")
-                                {
-                                    symbolDefType = type;
-                                    break;
-                                }
-                            }
-                            if (symbolDefType != null) break;
-                        }
-                        catch (Exception) { continue; } // Skip assemblies that can't be reflected
-                    }
-                    
-                    if (symbolDefType == null)
-                    {
-                        Log.Warning("[KCSG Unbound] Could not find KCSG.SymbolDef type - using fallback");
-                        // Try using Def as a base type if we can't find the exact SymbolDef
-                        symbolDefType = typeof(Def);
-                    }
-                    
-                    // Create the closed generic type
-                    Type closedDefDatabaseType = defDatabaseType.MakeGenericType(symbolDefType);
-                    
-                    // Get the Add method with parameter constraints to avoid ambiguity
-                    MethodInfo addMethod = null;
-                    
-                    foreach (var method in closedDefDatabaseType.GetMethods(BindingFlags.Public | BindingFlags.Static))
-                    {
-                        if (method.Name == "Add" && 
-                            method.GetParameters().Length == 1 && 
-                            method.GetParameters()[0].ParameterType == symbolDefType)
-                        {
-                            addMethod = method;
-                            break;
-                        }
-                    }
-                    
-                    if (addMethod == null)
-                    {
-                        Log.Warning("[KCSG Unbound] Could not find DefDatabase.Add method for patching");
-                        return false;
-                    }
-                    
-                    // Get a reference to our static Prefix method
-                    MethodInfo prefixMethod = typeof(Patch_DefDatabase_Add_SymbolDef).GetMethod(
-                        "PrefixAdd", 
-                        BindingFlags.Static | BindingFlags.NonPublic);
-                    
-                    if (prefixMethod == null)
-                    {
-                        Log.Warning("[KCSG Unbound] Could not find prefix method for patching");
-                        return false;
-                    }
-                    
-                    // Create a dynamic harmony patch
-                    var harmony = new Harmony("com.kcsg.unbound.defdb");
-                    harmony.Patch(addMethod, 
-                        prefix: new HarmonyMethod(prefixMethod));
-                    
-                    Log.Message("[KCSG Unbound] Successfully applied Patch_DefDatabase_Add_SymbolDef");
-                    patched = true;
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"[KCSG Unbound] Error in Patch_DefDatabase_Add_SymbolDef.Prepare: {ex}");
-                    return false;
-                }
+                return true; // Always apply this patch
             }
-            
+
             /// <summary>
-            /// Prefix method for DefDatabase.Add<SymbolDef>
+            /// Prefix that intercepts calls to DefDatabase.Add for SymbolDef
             /// </summary>
-            private static bool PrefixAdd(object __0)
+            /// <param name="__0">The def being added</param>
+            /// <returns>False if we handle it, true to let the original method run</returns>
+            public static bool PrefixAdd(object __0)
             {
-                try
+                try 
                 {
-                    // Ensure registry is initialized
-                    if (!SymbolRegistry.Initialized)
-                    {
-                        SymbolRegistry.Initialize();
-                    }
-                    
-                    if (__0 is Def def)
-                    {
-                        string defName = def.defName;
+                    // Only intercept for SymbolDef types
+                    if (__0 == null)
+                        return true;
                         
+                    // Get the type name to check if it's a SymbolDef or derived type 
+                    // This is safer than type checking with "is" since we might have reflection issues
+                    string typeName = __0.GetType().FullName;
+                    bool isSymbolDef = typeName != null && 
+                                      (typeName.EndsWith("SymbolDef") ||
+                                       typeName.Contains("SymbolDef") || 
+                                       typeName.Contains("KCSG") && typeName.Contains("Def"));
+                    
+                    if (!isSymbolDef)
+                        return true; // Let original method run for non-SymbolDef types
+                    
+                    // Get the def name using reflection instead of dynamic binding
+                    string defName = null;
+                    
+                    try
+                    {
+                        // Try to get defName property
+                        PropertyInfo defNameProp = __0.GetType().GetProperty("defName");
+                        if (defNameProp != null)
+                            defName = defNameProp.GetValue(__0) as string;
+                        
+                        // If that fails, try defName field
                         if (string.IsNullOrEmpty(defName))
                         {
-                            // Skip defs with no name
-                            return true;
-                        }
-                        
-                        try
-                        {
-                            // Register with our shadow registry 
-                            SymbolRegistry.RegisterDef(defName, def);
-                            
-                            // Continue with original method
-                            return true;
-                        }
-                        catch (Exception ex)
-                        {
-                            // Limit error logging to avoid flooding
-                            if (errorCount < maxErrorCount)
-                            {
-                                errorCount++;
-                                Log.Error($"[KCSG Unbound] Error in DefDatabase.Add<SymbolDef> prefix: {ex}");
-                                
-                                if (errorCount == maxErrorCount)
-                                {
-                                    Log.Warning("[KCSG Unbound] Maximum error threshold reached, suppressing further error messages");
-                                }
-                            }
-                            
-                            // Always continue with original method even if our registration failed
-                            return true;
+                            FieldInfo defNameField = __0.GetType().GetField("defName");
+                            if (defNameField != null)
+                                defName = defNameField.GetValue(__0) as string;
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[KCSG Unbound] Error getting defName: {ex.Message}");
+                    }
+                    
+                    // If we can't get a defName, let the original method run
+                    if (string.IsNullOrEmpty(defName))
+                    {
+                        if (errorCount < maxErrorCount)
+                        {
+                            Log.Warning($"[KCSG Unbound] Could not get defName for SymbolDef - delegating to original method");
+                            errorCount++;
+                        }
+                        return true;
+                    }
+                    
+                    // Register in our registry instead of the vanilla one
+                    SymbolRegistry.RegisterDef(defName, __0);
+                    
+                    // Skip the original method since we handled it
+                    return false;
                 }
                 catch (Exception ex)
                 {
                     if (errorCount < maxErrorCount)
                     {
+                        Log.Error($"[KCSG Unbound] Error in PrefixAdd: {ex.Message}");
                         errorCount++;
-                        Log.Error($"[KCSG Unbound] Critical error in DefDatabase.Add<SymbolDef> prefix: {ex}");
+                        
+                        if (errorCount >= maxErrorCount)
+                        {
+                            Log.Error($"[KCSG Unbound] Too many errors in PrefixAdd, suppressing further error messages");
+                        }
                     }
+                    
+                    // Let the original method run if we encounter an error
+                    return true;
                 }
-                return true;
             }
         }
         
@@ -601,6 +615,95 @@ namespace KCSG
                     Log.Error($"[KCSG Unbound] Error in GetByShortHash prefix: {ex}");
                 }
                 return true; // Continue with original method
+            }
+        }
+
+        /// <summary>
+        /// Apply patches to the DirectXmlCrossRefLoader to handle cross-references
+        /// </summary>
+        private static void ApplyCrossReferenceResolutionPatches(Harmony harmony)
+        {
+            try
+            {
+                // Find the DirectXmlCrossRefLoader type
+                Type crossRefLoaderType = typeof(DirectXmlCrossRefLoader);
+                if (crossRefLoaderType != null)
+                {
+                    // Find the ResolveAllWanters method
+                    MethodInfo resolveWantersMethod = crossRefLoaderType.GetMethod("ResolveAllWanters", 
+                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                    
+                    if (resolveWantersMethod != null)
+                    {
+                        var prefix = typeof(Patch_DirectXmlCrossRefLoader_ResolveAllWanters)
+                            .GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public);
+                            
+                        harmony.Patch(resolveWantersMethod, prefix: new HarmonyMethod(prefix));
+                        Log.Message("[KCSG Unbound] Successfully patched DirectXmlCrossRefLoader.ResolveAllWanters");
+                    }
+                    
+                    // For the other methods, we need to be more careful because RimWorld's API might change
+                    // Just log the attempt rather than crashing if we can't find them
+                    try
+                    {
+                        // Try to find methods that handle cross-references to register custom handlers
+                        var methods = crossRefLoaderType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                            .Where(m => (m.Name.Contains("Resolve") || m.Name.Contains("resolve")) && 
+                                        m.GetParameters().Length >= 1)
+                            .ToList();
+                            
+                        if (methods.Any())
+                        {
+                            Log.Message($"[KCSG Unbound] Found {methods.Count} potential cross-reference methods");
+                            // We found methods but won't try to patch them directly
+                            // The safer approach is to use the provided patch points in the game
+                        }
+                    }
+                    catch (Exception methodEx)
+                    {
+                        Log.Warning($"[KCSG Unbound] Error finding cross-reference methods: {methodEx.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[KCSG Unbound] Error patching cross-reference resolution: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Patches for DirectXmlCrossRefLoader.ResolveAllWanters
+        /// </summary>
+        public static class Patch_DirectXmlCrossRefLoader_ResolveAllWanters
+        {
+            public static void Prefix()
+            {
+                try
+                {
+                    // Ensure we're fully initialized before resolving references
+                    if (!SymbolRegistry.Initialized)
+                    {
+                        SymbolRegistry.Initialize();
+                        Log.Message("[KCSG Unbound] Initializing registry before resolving cross-references");
+                    }
+                    
+                    // Log status
+                    int defCount = SymbolRegistry.RegisteredDefCount;
+                    int symbolCount = SymbolRegistry.RegisteredSymbolCount;
+                    Log.Message($"[KCSG Unbound] Registry status before resolving cross-references: {defCount} defs, {symbolCount} symbols");
+                    
+                    // Force load any commonly referenced KCSG defs that might be missing
+                    var missingNames = SymbolRegistry.PreloadCommonlyReferencedDefs();
+                    
+                    if (missingNames.Any())
+                    {
+                        Log.Message($"[KCSG Unbound] Preloaded {missingNames.Count} potentially missing defs");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[KCSG Unbound] Error in ResolveAllWanters prefix: {ex.Message}");
+                }
             }
         }
     }

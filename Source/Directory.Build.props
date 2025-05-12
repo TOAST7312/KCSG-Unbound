@@ -1,0 +1,1 @@
+<Project><PropertyGroup><ExcludeFromCompile>obj\**\*.cs</ExcludeFromCompile></PropertyGroup></Project>

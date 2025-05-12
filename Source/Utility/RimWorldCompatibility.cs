@@ -172,6 +172,8 @@ namespace KCSG
         /// </summary>
         public static void SyncRegistries()
         {
+            int syncCount = 0;
+            
             try
             {
                 var nativeResolvers = GetSymbolResolvers();
@@ -179,11 +181,23 @@ namespace KCSG
                 {
                     foreach (var pair in nativeResolvers)
                     {
-                        // Register with our shadow registry
-                        SymbolRegistry.Register(pair.Key, pair.Value);
+                        try
+                        {
+                            // Register with our shadow registry
+                            SymbolRegistry.Register(pair.Key, pair.Value);
+                            syncCount++;
+                        }
+                        catch (Exception resolverEx)
+                        {
+                            // Skip any problematic resolvers but continue with others
+                            if (Prefs.DevMode)
+                            {
+                                Log.Warning($"[KCSG] Failed to sync resolver for symbol '{pair.Key}': {resolverEx.Message}");
+                            }
+                        }
                     }
                     
-                    Log.Message($"[KCSG] Synchronized {nativeResolvers.Count} symbol resolvers from native registry");
+                    Log.Message($"[KCSG] Synchronized {syncCount} symbol resolvers from native registry");
                 }
             }
             catch (Exception ex)

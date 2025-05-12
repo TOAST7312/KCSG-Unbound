@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.IO;
 using RimWorld;
 using UnityEngine;
 using Verse;
@@ -122,70 +124,39 @@ namespace KCSG
         /// </summary>
         public override void GameComponentOnGUI()
         {
-            try
-            {
-                // Safety check: don't try to draw if we're in a context where GUI is not available
+            // Use the SafeRender utility to handle all rendering operations
+            RenderingDetector.SafeRender(() => {
+                // Skip if we're in a context where GUI is not available
                 if (Current.Game == null || Find.TickManager == null)
-                {
                     return;
-                }
                 
-                // Skip if rendering is suppressed
-                if (RenderingDetector.NoOutputRendering)
-                {
-                    return;
-                }
-            
                 if (showDebugWindow && Prefs.DevMode)
                 {
-                    try
-                    {
-                        windowRect = GUI.Window(594873, windowRect, DrawDebugWindow, "KCSG Unbound Symbol Monitor");
-                    }
-                    catch (Exception ex)
-                    {
-                        // Silently fail for GUI errors during window rendering
-                        if (Prefs.DevMode)
-                        {
-                            Log.Warning($"[KCSG Unbound] Debug window error: {ex.Message}");
-                        }
-                        showDebugWindow = false;
-                    }
+                    windowRect = GUI.Window(594873, windowRect, DrawDebugWindow, "KCSG Unbound Symbol Monitor");
                 }
                 
                 // Draw toggle button when Dev Mode is enabled
                 if (Prefs.DevMode)
                 {
-                    try
+                    Rect buttonRect = new Rect(Screen.width - 150, 10, 140, 24);
+                    if (Widgets.ButtonText(buttonRect, "Symbol Monitor"))
                     {
-                        Rect buttonRect = new Rect(Screen.width - 150, 10, 140, 24);
-                        if (Widgets.ButtonText(buttonRect, "Symbol Monitor"))
-                        {
-                            showDebugWindow = !showDebugWindow;
-                        }
-                        
-                        // Draw error indicator if there have been errors
-                        if (hadErrors)
-                        {
-                            Rect errorRect = new Rect(Screen.width - 150, 40, 140, 24);
-                            GUI.color = Color.red;
-                            if (Widgets.ButtonText(errorRect, "KCSG Errors!"))
-                            {
-                                showDebugWindow = true;
-                            }
-                            GUI.color = Color.white;
-                        }
+                        showDebugWindow = !showDebugWindow;
                     }
-                    catch (Exception)
+                    
+                    // Draw error indicator if there have been errors
+                    if (hadErrors)
                     {
-                        // Silently ignore GUI errors in the button drawing
+                        Rect errorRect = new Rect(Screen.width - 150, 40, 140, 24);
+                        GUI.color = Color.red;
+                        if (Widgets.ButtonText(errorRect, "KCSG Errors!"))
+                        {
+                            showDebugWindow = true;
+                        }
+                        GUI.color = Color.white;
                     }
                 }
-            }
-            catch (Exception)
-            {
-                // Silently ignore all GUI errors to prevent UI spam
-            }
+            });
         }
         
         /// <summary>
@@ -374,9 +345,13 @@ namespace KCSG
                         $"<color=yellow>Note: Showing summary based on first 1000 defs (of {registeredDefsCount} total)</color>");
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Silently fail to avoid UI errors
+                if (Prefs.DevMode)
+                {
+                    Log.Error($"[KCSG Unbound] Error drawing defs list: {ex.Message}");
+                }
             }
         }
         
@@ -411,6 +386,150 @@ namespace KCSG
             }
             
             Log.Message("════════════════════════════════════════════════════");
+            
+            // Write logs to disk
+            WriteRuntimeLog();
+            WriteBasegenAnalysis();
+        }
+        
+        /// <summary>
+        /// Writes runtime statistics to a log file
+        /// </summary>
+        private void WriteRuntimeLog()
+        {
+            try
+            {
+                string content = $"KCSG Unbound Runtime Log - {DateTime.Now}\n";
+                content += "════════════════════════════════════════════════════\n";
+                content += $"Total SymbolDefs registered: {registeredDefsCount}\n";
+                content += $"Total Symbols registered: {registeredSymbolsCount}\n\n";
+                
+                if (registeredDefsCount > 65535)
+                {
+                    content += $"Status: EXCEEDED VANILLA LIMIT - Unbound active and working\n";
+                    content += $"Defs above vanilla limit: {registeredDefsCount - 65535}\n";
+                }
+                else
+                {
+                    content += $"Status: Within vanilla limits ({registeredDefsCount} / 65535)\n";
+                }
+                
+                content += "════════════════════════════════════════════════════\n";
+                content += "Registered Symbols:\n";
+                
+                // Add a sample of registered symbols
+                var symbolNames = SymbolRegistry.AllRegisteredSymbolNames;
+                if (symbolNames != null && symbolNames.Count() > 0)
+                {
+                    int count = 0;
+                    foreach (string symbol in symbolNames)
+                    {
+                        content += $"- {symbol}\n";
+                        count++;
+                        if (count >= 100)
+                        {
+                            content += $"... and {symbolNames.Count() - 100} more symbols (truncated for log size)\n";
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    content += "No symbols registered yet.\n";
+                }
+                
+                content += "════════════════════════════════════════════════════\n";
+                content += "Recent Errors:\n";
+                
+                if (hadErrors && recentErrors != null && recentErrors.Count > 0)
+                {
+                    foreach (string error in recentErrors)
+                    {
+                        content += $"- {error}\n";
+                    }
+                }
+                else
+                {
+                    content += "No errors recorded.\n";
+                }
+                
+                // Write to file in the RimWorld directory
+                string filePath = Path.Combine(GenFilePaths.ConfigFolderPath, "..", "KCSGUnbound_runtime_log.txt");
+                File.WriteAllText(filePath, content);
+                Log.Message($"[KCSG Unbound] Runtime log written to {filePath}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Failed to write runtime log: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Writes detailed basegen analysis to a log file
+        /// </summary>
+        private void WriteBasegenAnalysis()
+        {
+            try
+            {
+                string content = $"KCSG Unbound BaseGen Analysis - {DateTime.Now}\n";
+                content += "════════════════════════════════════════════════════\n";
+                content += $"Total SymbolDefs registered: {registeredDefsCount}\n\n";
+                
+                // Add analysis by first letter
+                var registeredDefNames = SymbolRegistry.AllRegisteredDefNames;
+                if (registeredDefNames != null && registeredDefNames.Count() > 0)
+                {
+                    Dictionary<char, List<string>> defsByFirstLetter = new Dictionary<char, List<string>>();
+                    
+                    foreach (string defName in registeredDefNames)
+                    {
+                        if (string.IsNullOrEmpty(defName)) continue;
+                        
+                        char firstChar = char.ToUpper(defName[0]);
+                        if (!defsByFirstLetter.ContainsKey(firstChar))
+                        {
+                            defsByFirstLetter[firstChar] = new List<string>();
+                        }
+                        defsByFirstLetter[firstChar].Add(defName);
+                    }
+                    
+                    // Sort by letter
+                    List<char> sortedLetters = new List<char>(defsByFirstLetter.Keys);
+                    sortedLetters.Sort();
+                    
+                    content += "Defs by First Letter:\n";
+                    foreach (char letter in sortedLetters)
+                    {
+                        var defs = defsByFirstLetter[letter];
+                        content += $"\n[{letter}] - {defs.Count} defs\n";
+                        
+                        // List up to 50 defs per letter to avoid massive logs
+                        int maxToShow = Math.Min(defs.Count, 50);
+                        for (int i = 0; i < maxToShow; i++)
+                        {
+                            content += $"  - {defs[i]}\n";
+                        }
+                        
+                        if (defs.Count > 50)
+                        {
+                            content += $"  ... and {defs.Count - 50} more (truncated for log size)\n";
+                        }
+                    }
+                }
+                else
+                {
+                    content += "No defs registered yet.\n";
+                }
+                
+                // Write to file in the RimWorld directory
+                string filePath = Path.Combine(GenFilePaths.ConfigFolderPath, "..", "KCSGUnbound_basegen_analysis.txt");
+                File.WriteAllText(filePath, content);
+                Log.Message($"[KCSG Unbound] BaseGen analysis written to {filePath}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Failed to write basegen analysis: {ex.Message}");
+            }
         }
         
         /// <summary>
