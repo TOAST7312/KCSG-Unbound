@@ -234,6 +234,10 @@ namespace KCSG
                 {
                     LoadAlphaBooksStructures();
                 }
+                else if (modId.Contains("reinforcedmechanoids") || modId.Contains("rm2"))
+                {
+                    LoadReinforcedMechanoidsStructures();
+                }
                 else
                 {
                     // Generic structure loading for other mods
@@ -433,73 +437,165 @@ namespace KCSG
         }
         
         /// <summary>
-        /// Load structures for a generic mod by looking at its XML files
+        /// Load generic structures from any mod with adaptive scanning
         /// </summary>
-        private static void LoadGenericModStructures(string modId)
+        public static void LoadGenericModStructures(string modId)
         {
-            // Find the mod in the running mods
-            ModContentPack mod = LoadedModManager.RunningModsListForReading.FirstOrDefault(m => 
-                m.PackageId.Contains(modId));
-            
-            if (mod == null) return;
-            
-            Log.Message($"[KCSG Unbound] Loading structures for {mod.Name}");
-            
-            // Check common folder patterns where structure layouts might be stored
-            string[] structureFolderPatterns = new[] {
-                "Defs/StructureDefs",
-                "Defs/StructureLayoutDefs",
-                "Defs/StructureGen",
-                "Defs/Structures",
-                "Defs/CustomGenDefs",
-                "Defs/CustomGenDefs/StructureLayoutDefs",
-                "Defs/SettlementLayoutDefs",
-                "Defs/SettlementDefs",
-                "Defs/LayoutDefs"
-            };
-            
-            // Track registered defNames to avoid duplicates
-            HashSet<string> registeredDefNames = new HashSet<string>();
-            
-            // Scan XML files for structure defs
-            foreach (string folder in structureFolderPatterns)
+            try
             {
-                string folderPath = Path.Combine(mod.RootDir, folder);
-                if (!Directory.Exists(folderPath)) continue;
+                if (string.IsNullOrEmpty(modId))
+                    return;
+                    
+                // Check if this mod might have KCSG structures based on its file structure
+                ModContentPack mod = LoadedModManager.RunningModsListForReading.FirstOrDefault(m => 
+                    m.PackageId.Equals(modId, StringComparison.OrdinalIgnoreCase) ||
+                    m.PackageId.Contains(modId));
+                    
+                if (mod == null)
+                    return;
+                    
+                // Look for structure-related folders
+                bool hasStructureFolder = false;
                 
-                foreach (string file in Directory.GetFiles(folderPath, "*.xml", SearchOption.AllDirectories))
+                // Check common structure-related folders
+                string[] structureFolders = new[]
                 {
-                    try
+                    Path.Combine(mod.RootDir, "Defs", "StructureLayoutDefs"),
+                    Path.Combine(mod.RootDir, "1.5", "Defs", "StructureLayoutDefs"),
+                    Path.Combine(mod.RootDir, "Defs", "KCSG"),
+                    Path.Combine(mod.RootDir, "1.5", "Defs", "KCSG"),
+                    Path.Combine(mod.RootDir, "Defs", "Structures"),
+                    Path.Combine(mod.RootDir, "1.5", "Defs", "Structures"),
+                    Path.Combine(mod.RootDir, "Defs", "CustomGenDefs"),
+                    Path.Combine(mod.RootDir, "1.5", "Defs", "CustomGenDefs")
+                };
+                
+                // Check for structure folders
+                foreach (var folderPath in structureFolders)
+                {
+                    if (Directory.Exists(folderPath))
                     {
-                        // Use XmlReader for efficient streaming
-                        using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan))
-                        using (System.Xml.XmlReader reader = System.Xml.XmlReader.Create(fs, new System.Xml.XmlReaderSettings { IgnoreWhitespace = true, IgnoreComments = true }))
+                        hasStructureFolder = true;
+                        break;
+                    }
+                }
+                
+                // If this mod has structure folders, look for possible prefixes
+                if (hasStructureFolder)
+                {
+                    // Generate likely prefixes from mod name
+                    string modName = mod.Name;
+                    string acronym = string.Join("", modName.Split(' ')
+                        .Where(s => !string.IsNullOrEmpty(s))
+                        .Select(s => char.ToUpper(s[0])));
+                        
+                    if (acronym.Length >= 2)
+                    {
+                        RegisterPrefix(acronym + "_");
+                    }
+                    
+                    // Use author tag from package ID
+                    string packageId = mod.PackageId;
+                    if (packageId.Contains('.'))
+                    {
+                        string authorTag = packageId.Split('.')[0];
+                        if (!string.IsNullOrEmpty(authorTag))
                         {
-                            while (reader.Read())
-                            {
-                                if (reader.NodeType == System.Xml.XmlNodeType.Element && reader.Name == "defName")
-                                {
-                                    string defName = reader.ReadElementContentAsString().Trim();
-                                    
-                                    // Register if not already registered
-                                    if (!string.IsNullOrEmpty(defName) && !registeredDefNames.Contains(defName) && !SymbolRegistry.IsDefRegistered(defName))
-                                    {
-                                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
-                                        SymbolRegistry.RegisterDef(defName, placeholderDef);
-                                        registeredDefNames.Add(defName);
-                                    }
-                                }
-                            }
+                            RegisterPrefix(authorTag.ToUpperInvariant() + "_");
                         }
                     }
-                    catch (Exception ex)
+                    
+                    // First word of mod name
+                    string firstWord = modName.Split(' ').FirstOrDefault();
+                    if (!string.IsNullOrEmpty(firstWord) && firstWord.Length >= 2)
                     {
-                        Log.Warning($"[KCSG Unbound] Error processing XML file {file}: {ex.Message}");
+                        RegisterPrefix(firstWord.ToUpperInvariant() + "_");
                     }
                 }
             }
+            catch (Exception ex)
+            {
+                Log.Warning($"[KCSG Unbound] Error loading generic structures for {modId}: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Register a prefix and common variants
+        /// </summary>
+        private static void RegisterPrefix(string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix))
+                return;
+                
+            // Register base prefix for direction variations
+            RegisterPrefixWithVariations(prefix);
             
-            Log.Message($"[KCSG Unbound] Registered {registeredDefNames.Count} structures for {mod.Name}");
+            // Register common structure types
+            RegisterPrefixWithType(prefix, "Structure");
+            RegisterPrefixWithType(prefix, "Layout");
+            RegisterPrefixWithType(prefix, "Building");
+            RegisterPrefixWithType(prefix, "Base");
+            RegisterPrefixWithType(prefix, "Outpost");
+            RegisterPrefixWithType(prefix, "Settlement");
+            RegisterPrefixWithType(prefix, "Camp");
+            RegisterPrefixWithType(prefix, "Site");
+        }
+        
+        /// <summary>
+        /// Register a prefix with a specific structure type
+        /// </summary>
+        private static void RegisterPrefixWithType(string prefix, string type)
+        {
+            // Base type
+            string baseName = $"{prefix}{type}";
+            if (!SymbolRegistry.IsDefRegistered(baseName))
+            {
+                try
+                {
+                    object placeholderDef = SymbolRegistry.CreatePlaceholderDef(baseName);
+                    SymbolRegistry.RegisterDef(baseName, placeholderDef);
+                }
+                catch {}
+            }
+            
+            // Numbered variants (1-5)
+            for (int i = 1; i <= 5; i++)
+            {
+                string numberedName = $"{baseName}{i}";
+                if (!SymbolRegistry.IsDefRegistered(numberedName))
+                {
+                    try
+                    {
+                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(numberedName);
+                        SymbolRegistry.RegisterDef(numberedName, placeholderDef);
+                    }
+                    catch {}
+                }
+            }
+            
+            // Letter variants (A-E)
+            for (char c = 'A'; c <= 'E'; c++)
+            {
+                string letteredName = $"{baseName}{c}";
+                if (!SymbolRegistry.IsDefRegistered(letteredName))
+                {
+                    try
+                    {
+                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(letteredName);
+                        SymbolRegistry.RegisterDef(letteredName, placeholderDef);
+                    }
+                    catch {}
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Registers prefix-based structure variations
+        /// </summary>
+        private static void RegisterPrefixWithVariations(string prefix)
+        {
+            // Use the centralized method for registering variations
+            RimWorldCompatibility.RegisterWithVariations(prefix);
         }
         
         /// <summary>
@@ -579,6 +675,48 @@ namespace KCSG
             }
             
             Log.Message($"[KCSG Unbound] Registered {count} Alpha Books structures");
+        }
+        
+        /// <summary>
+        /// Load structures for Reinforced Mechanoids 2 mod
+        /// </summary>
+        private static void LoadReinforcedMechanoidsStructures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for Reinforced Mechanoids 2");
+            
+            // Load critical base names for Reinforced Mechanoids
+            List<string> criticalBaseNames = new List<string>
+            {
+                // Main mechanoid structures
+                "Base", "Camp", "Outpost", "Bunker", "Hive", "Nest",
+                "Factory", "Barracks", "Hangar", "Fabricator", "Assembler",
+                "Armory", "Laboratory", "Command", "Station", "Sentinel",
+                
+                // Specific mechanoid types from the mod
+                "Behemoth", "Buffer", "Caretaker", "Falcon", "Gremlin", 
+                "Harpy", "Locust", "Marshal", "Matriarch", "Ranger",
+                "Sentinel", "SentinelBrawler", "Spartan", "Vulture", 
+                "Wraith", "Zealot", "ZealotAssassin"
+            };
+            
+            RegisterStructureVariants("RM_", criticalBaseNames);
+            
+            // Also register compound variants
+            string[] compoundNames = new[]
+            {
+                "MechBase", "MechHive", "MechNest", "MechOutpost", "MechStation",
+                "MechFactory", "AssemblyComplex", "CommandCenter", "DefensePost"
+            };
+            
+            foreach(var name in compoundNames)
+            {
+                string defName = $"RM_{name}";
+                if (!SymbolRegistry.IsDefRegistered(defName))
+                {
+                    object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                    SymbolRegistry.RegisterDef(defName, placeholderDef);
+                }
+            }
         }
         
         /// <summary>

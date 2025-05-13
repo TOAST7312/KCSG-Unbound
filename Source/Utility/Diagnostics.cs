@@ -11,7 +11,7 @@ namespace KCSG
     /// </summary>
     public static class Diagnostics
     {
-        // Whether verbose logging is enabled
+        // Whether verbose logging is enabled for console output
         private static bool verboseLogging = false;
         
         // Path to the diagnostic log file
@@ -25,6 +25,9 @@ namespace KCSG
         
         // Track if initialized
         private static bool initialized = false;
+        
+        // Minimum log level based on settings
+        private static LogLevel minimumLogLevel = LogLevel.Normal;
         
         /// <summary>
         /// Initialize the diagnostics system
@@ -46,6 +49,13 @@ namespace KCSG
                     writer.WriteLine("----------------------------------------");
                 }
                 
+                // Set verbose logging based on settings or dev mode
+                verboseLogging = Prefs.DevMode || KCSGUnboundSettings.LoggingLevel >= LogLevel.Verbose;
+                minimumLogLevel = KCSGUnboundSettings.LoggingLevel;
+                
+                // Log initialization
+                WriteToLog($"[{DateTime.Now}] Diagnostics initialized with log level: {minimumLogLevel}, verbose: {verboseLogging}");
+                
                 initialized = true;
                 Log.Message("[KCSG Unbound] Diagnostic logging initialized");
             }
@@ -61,11 +71,11 @@ namespace KCSG
         public static void SetVerboseLogging(bool enabled)
         {
             verboseLogging = enabled;
-            LogDiagnostic($"Verbose logging {(enabled ? "enabled" : "disabled")}");
+            WriteToLog($"[{DateTime.Now}] Verbose logging {(enabled ? "enabled" : "disabled")}");
         }
         
         /// <summary>
-        /// Log a diagnostic message
+        /// Log a diagnostic message - always goes to file, conditionally to console
         /// </summary>
         public static void LogDiagnostic(string message, bool force = false)
         {
@@ -77,16 +87,13 @@ namespace KCSG
                 // Add timestamp
                 string timestampedMessage = $"[{DateTime.Now}] {message}";
                 
-                // Add to buffer
-                lock (logBuffer)
-                {
-                    logBuffer.AppendLine(timestampedMessage);
-                }
+                // Always write to the file regardless of settings
+                WriteToLog(timestampedMessage);
                 
-                // Check if we should flush
-                if (force || (DateTime.Now - lastFlush).TotalSeconds > 5)
+                // Only write to console if verbose logging is enabled or if forced
+                if (verboseLogging || force || minimumLogLevel >= LogLevel.Verbose)
                 {
-                    FlushLogBuffer();
+                    Log.Message($"[KCSG Unbound] {message}");
                 }
             }
             catch
@@ -96,18 +103,20 @@ namespace KCSG
         }
         
         /// <summary>
-        /// Log verbose diagnostic information
+        /// Log verbose diagnostic information - always to file, conditionally to console
         /// </summary>
         public static void LogVerbose(string message)
         {
-            if (verboseLogging)
+            if (!initialized)
+                Initialize();
+                
+            // Always write to the log file
+            WriteToLog($"[{DateTime.Now}] [VERBOSE] {message}");
+            
+            // Only write to console if verbose logging is enabled
+            if (verboseLogging || minimumLogLevel >= LogLevel.Verbose)
             {
-                LogDiagnostic($"[VERBOSE] {message}");
-            }
-            else
-            {
-                // Still log to file but not console
-                TryAppendToFile($"[{DateTime.Now}] [VERBOSE] {message}");
+                Log.Message($"[KCSG Unbound] [VERBOSE] {message}");
             }
         }
         
@@ -116,22 +125,64 @@ namespace KCSG
         /// </summary>
         public static void LogWarning(string message)
         {
-            LogDiagnostic($"[WARNING] {message}");
+            if (!initialized)
+                Initialize();
+                
+            // Always log warnings to file
+            WriteToLog($"[{DateTime.Now}] [WARNING] {message}");
             
-            // Also log to main log if verbose is enabled
-            if (verboseLogging)
+            // Only log to console based on minimum level
+            if (minimumLogLevel >= LogLevel.Minimal)
             {
                 Log.Warning($"[KCSG Unbound] {message}");
             }
         }
         
         /// <summary>
-        /// Log error information to diagnostics
+        /// Log error information to diagnostics - always goes to both file and console
         /// </summary>
         public static void LogError(string message)
         {
-            LogDiagnostic($"[ERROR] {message}", true);
+            if (!initialized)
+                Initialize();
+                
+            // Always log errors
+            WriteToLog($"[{DateTime.Now}] [ERROR] {message}");
             Log.Error($"[KCSG Unbound] {message}");
+        }
+        
+        /// <summary>
+        /// Write directly to the log file
+        /// </summary>
+        private static void WriteToLog(string message)
+        {
+            if (string.IsNullOrEmpty(diagnosticLogPath))
+                return;
+                
+            try
+            {
+                // Ensure there's a newline
+                if (!message.EndsWith(Environment.NewLine))
+                    message += Environment.NewLine;
+                    
+                // Use a direct file append to ensure it gets written
+                using (StreamWriter writer = new StreamWriter(diagnosticLogPath, true))
+                {
+                    writer.Write(message);
+                }
+            }
+            catch (Exception ex)
+            {
+                // If we can't write to the log file, at least try to log to the console
+                try
+                {
+                    Log.Error($"[KCSG Unbound] Failed to write to diagnostic log: {ex.Message}");
+                }
+                catch
+                {
+                    // Truly last-resort - just swallow the error if even that fails
+                }
+            }
         }
         
         /// <summary>
@@ -153,36 +204,31 @@ namespace KCSG
                     logBuffer.Clear();
                 }
                 
-                // Write to file
-                TryAppendToFile(bufferContent);
+                // Write to file directly
+                WriteToLog(bufferContent);
                 
                 lastFlush = DateTime.Now;
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore errors during flushing
+                // Try to log the error
+                try
+                {
+                    Log.Error($"[KCSG Unbound] Error flushing log buffer: {ex.Message}");
+                }
+                catch
+                {
+                    // Ignore if even that fails
+                }
             }
         }
         
         /// <summary>
-        /// Try to append text to the log file
+        /// Try to append text to the log file - deprecated in favor of WriteToLog
         /// </summary>
         private static void TryAppendToFile(string content)
         {
-            if (string.IsNullOrEmpty(diagnosticLogPath))
-                return;
-            
-            try
-            {
-                using (StreamWriter writer = new StreamWriter(diagnosticLogPath, true))
-                {
-                    writer.Write(content);
-                }
-            }
-            catch
-            {
-                // Ignore file IO errors
-            }
+            WriteToLog(content);
         }
     }
 } 

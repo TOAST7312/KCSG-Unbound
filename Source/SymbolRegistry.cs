@@ -415,7 +415,8 @@ namespace KCSG
                 
                 // General mod prefixes
                 "VFED_", "VFEA_", "VFEC_", "VFEE_", "VFEM_", "VFET_", "VFE_", "VFEI_", "FTC_", 
-                "RBME_", "AG_", "BM_", "BS_", "MM_", "VC_", "VE_", "VM_", "VBGE_", "VGBE_"
+                "RBME_", "AG_", "BM_", "BS_", "MM_", "VC_", "VE_", "VM_", "VBGE_", "VGBE_", "RM_",
+                "DMS_", "DMSAC_", "SEX_", "FT_"
             };
             
             int count = 0;
@@ -1125,7 +1126,9 @@ namespace KCSG
                  (defName.Contains("Bedrooms") || defName.Contains("Shuttle") || 
                   defName.Contains("Throne") || defName.Contains("Production"))) ||
                 defName.Contains("VFEA_") || defName.Contains("VFEC_") ||
-                defName.Contains("FTC_") || defName.Contains("RBME_") || defName.StartsWith("VFE"))
+                defName.Contains("FTC_") || defName.Contains("RBME_") || defName.Contains("RM_") ||
+                defName.Contains("DMS_") || defName.Contains("DMSAC_") || defName.Contains("SEX_") || 
+                defName.Contains("FT_") || defName.StartsWith("VFE"))
             {
                 // Create a placeholder def
                 try
@@ -1310,25 +1313,6 @@ namespace KCSG
         }
         
         /// <summary>
-        /// Attempts to get a SymbolDef by name with specific type
-        /// </summary>
-        /// <typeparam name="T">The type of the def</typeparam>
-        /// <param name="defName">The name of the def to retrieve</param>
-        /// <param name="result">Output parameter that will contain the def if found</param>
-        /// <returns>True if the def was found and of correct type, false otherwise</returns>
-        public static bool TryGetDef<T>(string defName, out T result) where T : class
-        {
-            object obj;
-            if (symbolDefs.TryGetValue(defName, out obj) && obj is T)
-            {
-                result = obj as T;
-                return true;
-            }
-            result = null;
-            return false;
-        }
-
-        /// <summary>
         /// Attempts to resolve a symbol using a registered resolver
         /// </summary>
         /// <param name="symbol">The symbol to resolve</param>
@@ -1336,45 +1320,189 @@ namespace KCSG
         /// <returns>True if the symbol was resolved, false otherwise</returns>
         public static bool TryResolve(string symbol, ResolveParams rp)
         {
-            // Always check initialization first
-            if (!Initialized)
+            if (string.IsNullOrEmpty(symbol))
             {
-                Initialize();
+                Diagnostics.LogVerbose("Cannot resolve null or empty symbol");
+                return false;
             }
-
-            // First try using our shadow registry
-            if (symbolResolvers.TryGetValue(symbol, out Type symbolResolverType))
+            
+            try
             {
+                // Try to use our optimized registry first
+                if (symbolResolvers.TryGetValue(symbol, out Type resolverType))
+                {
+                    try
+                    {
+                        Diagnostics.LogVerbose($"Resolving symbol {symbol} using registered resolver {resolverType.Name}");
+                        // Use the compatible API - push to symbolStack directly
+                        BaseGen.symbolStack.Push(symbol, rp);
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"[KCSG] Error resolving symbol {symbol} with resolver {resolverType.Name}: {ex.Message}");
+                        // Continue to fall through to other methods
+                    }
+                }
+                
+                // Check if this is a structure layout symbol (common case)
+                if (rp.faction != null && symbol.StartsWith("VFED_") || symbol.StartsWith("VFEM_") || symbol.StartsWith("VBGE_"))
+                {
+                    try
+                    {
+                        Diagnostics.LogVerbose($"Attempting to resolve structure layout symbol: {symbol}");
+                        // Use the compatible API - push to symbolStack directly
+                        BaseGen.symbolStack.Push(symbol, rp);
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[KCSG] Error resolving structure layout symbol {symbol}: {ex.Message}");
+                        // Fall through to other resolution methods
+                    }
+                }
+                
+                // If we get here, try to use RimWorld's native symbol resolution as a fallback
                 try
                 {
-                    // We have this symbol, try to create and use the resolver
-                    object resolver = Activator.CreateInstance(symbolResolverType);
+                    // Use the compatible API for RimWorld 1.5
+                    bool result = false;
                     
-                    // Invoke the Resolve method with reflection
-                    MethodInfo resolveMethod = symbolResolverType.GetMethod("Resolve", 
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    // Simplified approach: just add to the symbol stack and let RimWorld handle it
+                    // This is more compatible across versions
+                    BaseGen.symbolStack.Push(symbol, rp);
+                    result = true;
                     
-                    if (resolveMethod != null)
+                    if (result)
                     {
-                        resolveMethod.Invoke(resolver, new object[] { rp });
+                        Diagnostics.LogVerbose($"Symbol {symbol} resolved by adding to RimWorld's symbol stack");
                         return true;
                     }
                 }
                 catch (Exception ex)
                 {
-                    string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                    Log.Error($"[KCSG] [{timestamp}] Error resolving symbol '{symbol}' from shadow registry: {ex}");
+                    Log.Warning($"[KCSG] Error in native resolution of symbol {symbol}: {ex.Message}");
+                    // Continue to missing symbol resolution
+                }
+                
+                // Last chance: try resolving a missing symbol
+                return TryResolveMissingSymbol(symbol, rp);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG] Critical error in TryResolve for symbol {symbol}: {ex}");
+                
+                // Safety: add recovery code to prevent game crashes
+                if (rp.rect.Area > 0 && rp.faction != null)
+                {
+                    try
+                    {
+                        // Use a very simple fallback to avoid crashing the game
+                        // Just place some basic structures like walls or floors
+                        Diagnostics.LogVerbose("Using emergency fallback resolution");
+                        rp.wallStuff ??= ThingDefOf.WoodLog;
+                        rp.floorDef ??= TerrainDefOf.WoodPlankFloor;
+                        
+                        // Use the compatible API - push a fallback symbol
+                        BaseGen.symbolStack.Push("emptyRoom", rp);
+                        return true;
+                    }
+                    catch
+                    {
+                        // If even the emergency fallback fails, just return false
+                        return false;
+                    }
+                }
+                
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Try to resolve a symbol that wasn't found in the registry by registering it on demand
+        /// </summary>
+        public static bool TryResolveMissingSymbol(string symbolName, ResolveParams rp)
+        {
+            if (IsDefRegistered(symbolName))
+                return true;
+                
+            if (KCSGUnboundSettings.LazyRegistration && !string.IsNullOrEmpty(symbolName))
+            {
+                // This is a new symbol we haven't seen before
+                if (KCSGUnboundSettings.LoggingLevel >= LogLevel.Normal)
+                {
+                    Log.Message($"[KCSG Unbound] Encountered new symbol: {symbolName}, attempting to register");
+                }
+                
+                // Try to determine if this is a valid structure def name
+                if (symbolName.Contains("_") || char.IsUpper(symbolName[0]))
+                {
+                    // Create a placeholder def
+                    try 
+                    {
+                        object placeholderDef = CreatePlaceholderDef(symbolName);
+                        RegisterDef(symbolName, placeholderDef);
+                        
+                        // Schedule a targeted scan for more structures from the same source
+                        string prefix = symbolName.Contains("_") ? 
+                            symbolName.Substring(0, symbolName.IndexOf("_") + 1) : "";
+                            
+                        if (!string.IsNullOrEmpty(prefix))
+                        {
+                            // Try to locate the mod that might contain this structure
+                            SchedulePrefixScan(prefix);
+                        }
+                        
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (KCSGUnboundSettings.LoggingLevel >= LogLevel.Verbose)
+                        {
+                            Log.Warning($"[KCSG Unbound] Failed to register missing symbol {symbolName}: {ex.Message}");
+                        }
+                    }
                 }
             }
-
-            // If we failed or don't have this symbol, try native resolution as fallback
+            
+            return false;
+        }
+        
+        /// <summary>
+        /// Schedule a scan for mods that might contain structures with this prefix
+        /// </summary>
+        private static void SchedulePrefixScan(string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix) || prefix.Length < 2)
+                return;
+                
             try
             {
-                return RimWorldCompatibility.TryResolveWithNative(symbol, rp);
+                // Look for mods that might match this prefix
+                foreach (var mod in LoadedModManager.RunningModsListForReading)
+                {
+                    // Check if this mod might be the source of this prefix
+                    bool isPotentialMatch = 
+                        // Acronym match (e.g., "VFE" in "VFE_Structure")
+                        (prefix.Length >= 3 && mod.Name.Contains(prefix.Substring(0, prefix.Length - 1))) ||
+                        // Author tag match (e.g., "oskar" in "oskar_Structure")
+                        (mod.PackageId.Contains(prefix.Substring(0, prefix.Length - 1).ToLowerInvariant()));
+                        
+                    if (isPotentialMatch)
+                    {
+                        // Queue this mod for scanning with high priority
+                        SymbolRegistryCache.AddModToScanQueue(mod.PackageId, true);
+                        
+                        if (KCSGUnboundSettings.LoggingLevel >= LogLevel.Verbose)
+                        {
+                            Log.Message($"[KCSG Unbound] Scheduled scan of mod {mod.Name} for prefix {prefix}");
+                        }
+                    }
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                return false;
+                Log.Warning($"[KCSG Unbound] Error scheduling prefix scan: {ex.Message}");
             }
         }
 

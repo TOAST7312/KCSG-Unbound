@@ -242,6 +242,81 @@ namespace KCSG
                 return false;
             }
         }
+
+        /// <summary>
+        /// Checks if a mod is loaded based on name, workshop ID, or package ID
+        /// </summary>
+        /// <param name="nameFragment">Fragment of the mod name to check (case sensitive)</param>
+        /// <param name="workshopId">Steam workshop ID to check</param>
+        /// <param name="packageIdFragment">Package ID fragment to check</param>
+        /// <returns>True if the mod is loaded, false otherwise</returns>
+        public static bool IsModLoaded(string nameFragment = null, string workshopId = null, string packageIdFragment = null)
+        {
+            // Require at least one parameter
+            if (string.IsNullOrEmpty(nameFragment) && 
+                string.IsNullOrEmpty(workshopId) && 
+                string.IsNullOrEmpty(packageIdFragment))
+            {
+                return false;
+            }
+
+            // Check all running mods against our search criteria
+            return LoadedModManager.RunningModsListForReading.Any(m => 
+                (!string.IsNullOrEmpty(nameFragment) && m.Name.Contains(nameFragment)) || 
+                (!string.IsNullOrEmpty(workshopId) && m.PackageId.Contains(workshopId)) || 
+                (!string.IsNullOrEmpty(packageIdFragment) && m.PackageId.Contains(packageIdFragment)));
+        }
+
+        /// <summary>
+        /// Registers prefix-based variations of structure names to handle different mod format approaches
+        /// </summary>
+        /// <param name="prefix">Base prefix for the structures (e.g., "VFED_")</param>
+        public static void RegisterWithVariations(string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix))
+                return;
+
+            // Common structure names that appear across many mods
+            List<string> commonStructureNames = new List<string>
+            {
+                "Main", "Base", "Building", "Room", "Entrance", "Center", 
+                "Wall", "Door", "Floor", "Stockpile", "Storage",
+                "Throne", "Bedroom", "Kitchen", "Workshop", "Defense", 
+                "Barracks", "Farm", "Garden", "Outpost", "Tower",
+                "Bridge", "Corridor", "Hallway", "Chamber"
+            };
+
+            // Register each common name with the prefix
+            foreach (var structureName in commonStructureNames)
+            {
+                string defName = prefix + structureName;
+                
+                // Only register if not already registered
+                if (!SymbolRegistry.IsDefRegistered(defName))
+                {
+                    try
+                    {
+                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                        SymbolRegistry.RegisterDef(defName, placeholderDef);
+                        
+                        // Also register with letter suffixes (A, B, C, etc.) which are common
+                        for (char letter = 'A'; letter <= 'F'; letter++)
+                        {
+                            string variantName = defName + letter;
+                            if (!SymbolRegistry.IsDefRegistered(variantName))
+                            {
+                                var variantDef = SymbolRegistry.CreatePlaceholderDef(variantName);
+                                SymbolRegistry.RegisterDef(variantName, variantDef);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Diagnostics.LogWarning($"Error registering structure {defName}: {ex.Message}");
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>

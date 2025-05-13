@@ -135,25 +135,128 @@ namespace KCSG
         {
             try
             {
-                System.Diagnostics.Stopwatch fullLoadStopwatch = new System.Diagnostics.Stopwatch();
-                fullLoadStopwatch.Start();
+                Log.Message("[KCSG Unbound] Performing full loading sequence");
                 
-                // Preload common KCSG structure layouts
-                PreloadStructureLayouts();
+                // Load module registrations
+                InitializeVFEDesertersLayouts();
+                InitializeVBGELayouts();
+                InitializeAlphaBooksLayouts();
+                InitializeVFEMechanoidLayouts();
+                InitializeVFEMedievalLayouts();
+                InitializeSaveOurShip2Layouts();
+                InitializeVanillaOutpostsLayouts();
+                InitializeVFEAncientsLayouts();
+                InitializeVFEInsectoidsLayouts();
+                InitializeVFEClassicalLayouts();
+                InitializeVFEEmpireLayouts();
+                InitializeReinforcedMechanoidsLayouts();
+                InitializeDeadMansSwitchLayouts();
+                InitializeMechanitorEncountersLayouts();
                 
-                // Load only the structures for mods that are actually loaded
-                // This avoids wasting memory on structures we'll never use
-                LoadModSpecificStructures();
+                // Explicitly register prefixes from any active mods (even if they don't have a specific initializer)
+                PreregisterPrefixesFromActiveMods();
                 
-                fullLoadStopwatch.Stop();
+                // Save the cache to disk
+                try {
+                    SymbolRegistryCache.SaveCache();
+                    Log.Message("[KCSG Unbound] Saving registry cache to disk after full loading");
+                }
+                catch (Exception saveEx) {
+                    Log.Warning($"[KCSG Unbound] Error saving cache after full loading: {saveEx.Message}");
+                }
                 
-                CurrentStatus = $"Loaded ({fullLoadStopwatch.ElapsedMilliseconds}ms)";
-                Log.Message($"[KCSG Unbound] Full structure loading complete in {fullLoadStopwatch.ElapsedMilliseconds}ms");
+                // Register successful initialization
+                initializationSuccess = true;
+                
+                // Stop and report timing
+                stopwatch.Stop();
+                Log.Message($"[KCSG Unbound] Full loading sequence completed in {stopwatch.ElapsedMilliseconds}ms");
+                CurrentStatus = "Initialized successfully";
             }
             catch (Exception ex)
             {
-                Log.Error($"[KCSG Unbound] Error during full structure loading: {ex}");
-                CurrentStatus = "Error during full loading";
+                // Report error
+                Log.Error($"[KCSG Unbound] Error during full loading: {ex}");
+                CurrentStatus = "Initialization failed with error";
+            }
+        }
+        
+        /// <summary>
+        /// Pre-register prefixes from all active mods based on their names
+        /// </summary>
+        private void PreregisterPrefixesFromActiveMods()
+        {
+            try
+            {
+                Log.Message("[KCSG Unbound] Pre-registering prefixes from active mods");
+                int prefixesRegistered = 0;
+                
+                foreach (var mod in LoadedModManager.RunningModsListForReading)
+                {
+                    try 
+                    {
+                        // Skip mods we've already processed in other initializers
+                        if (string.IsNullOrEmpty(mod.PackageId))
+                            continue;
+                            
+                        // Try to generate potential prefixes from this mod
+                        List<string> prefixes = new List<string>();
+                        
+                        // 1. Acronym from mod name (e.g., "Amazing Cool Mod" -> "ACM_")
+                        string modName = mod.Name;
+                        if (!string.IsNullOrEmpty(modName))
+                        {
+                            string acronym = string.Join("", modName.Split(' ')
+                                .Where(s => !string.IsNullOrEmpty(s))
+                                .Select(s => char.ToUpper(s[0])));
+                                
+                            if (acronym.Length >= 2)
+                            {
+                                prefixes.Add(acronym + "_");
+                            }
+                        }
+                        
+                        // 2. First part of packageId (e.g., "author.coolmod" -> "author_")
+                        string packageId = mod.PackageId;
+                        if (!string.IsNullOrEmpty(packageId) && packageId.Contains('.'))
+                        {
+                            string authorTag = packageId.Split('.')[0];
+                            if (!string.IsNullOrEmpty(authorTag))
+                            {
+                                prefixes.Add(authorTag.ToUpperInvariant() + "_");
+                            }
+                        }
+                        
+                        // 3. Sanitized mod name prefix
+                        if (!string.IsNullOrEmpty(modName))
+                        {
+                            // Take first word of mod name
+                            string firstWord = modName.Split(' ').FirstOrDefault();
+                            if (!string.IsNullOrEmpty(firstWord) && firstWord.Length >= 2)
+                            {
+                                prefixes.Add(firstWord.ToUpperInvariant() + "_");
+                            }
+                        }
+                        
+                        // Register variants for each detected prefix
+                        foreach (var prefix in prefixes)
+                        {
+                            RegisterWithVariations(prefix);
+                            prefixesRegistered++;
+                        }
+                    }
+                    catch (Exception modEx)
+                    {
+                        // Just log and continue - we don't want one bad mod to stop others
+                        Log.Warning($"[KCSG Unbound] Error processing prefixes for mod {mod.Name}: {modEx.Message}");
+                    }
+                }
+                
+                Log.Message($"[KCSG Unbound] Pre-registered {prefixesRegistered} prefixes from active mods");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[KCSG Unbound] Error pre-registering mod prefixes: {ex.Message}");
             }
         }
         
@@ -227,6 +330,18 @@ namespace KCSG
             {
                 InitializeVFEEmpireLayouts();
             }
+            
+            // Load Dead Man's Switch layouts if needed
+            if (IsModLoaded("Dead Man's Switch", "3469398006", "aoba.deadmanswitch"))
+            {
+                InitializeDeadMansSwitchLayouts();
+            }
+            
+            // Load Mechanitor Encounters layouts if needed
+            if (IsModLoaded("Mechanitor Encounters", "3417287863", ""))
+            {
+                InitializeMechanitorEncountersLayouts();
+            }
         }
         
         /// <summary>
@@ -234,10 +349,7 @@ namespace KCSG
         /// </summary>
         private bool IsModLoaded(string nameFragment, string workshopId, string packageIdFragment)
         {
-            return LoadedModManager.RunningModsListForReading.Any(m => 
-                (!string.IsNullOrEmpty(nameFragment) && m.Name.Contains(nameFragment)) || 
-                (!string.IsNullOrEmpty(workshopId) && m.PackageId.Contains(workshopId)) || 
-                (!string.IsNullOrEmpty(packageIdFragment) && m.PackageId.Contains(packageIdFragment)));
+            return RimWorldCompatibility.IsModLoaded(nameFragment, workshopId, packageIdFragment);
         }
         
         /// <summary>
@@ -256,6 +368,76 @@ namespace KCSG
                     SymbolRegistry.Initialize();
                     Log.Message("[KCSG Unbound] Registry initialized");
                 }
+                
+                // Also initialize cache
+                try
+                {
+                    SymbolRegistryCache.Initialize();
+                    Log.Message("[KCSG Unbound] Cache system initialized");
+                    
+                    // IMPORTANT: Pre-register common structures BEFORE scanning to ensure we have something
+                    PreloadStructureLayouts();
+                    
+                    // Force create and save a basic cache with the preloaded data
+                    try
+                    {
+                        SymbolRegistryCache.SaveCache();
+                        Log.Message("[KCSG Unbound] Initial registry cache saved to disk");
+                    }
+                    catch (Exception saveEx)
+                    {
+                        Log.Warning($"[KCSG Unbound] Error saving initial cache: {saveEx.Message}");
+                    }
+                    
+                    // Now force a scan of at least Core and this mod's files
+                    try 
+                    {
+                        // Make sure our own mod gets scanned first
+                        var ourMod = LoadedModManager.RunningModsListForReading.FirstOrDefault(m => 
+                            m.Name.Contains("KCSG") || 
+                            m.PackageId.Contains("KCSG") ||
+                            m.PackageId.Contains("unbound"));
+                        
+                        if (ourMod != null)
+                        {
+                            // Force scan this mod and save results regardless of success
+                            Log.Message("[KCSG Unbound] Force scanning this mod for structures");
+                            SymbolRegistryCache.AddModToScanQueue(ourMod.PackageId, true);
+                        }
+                        
+                        // Also scan the Core mod for any structures
+                        var coreMod = LoadedModManager.RunningModsListForReading.FirstOrDefault(m => 
+                            m.Name == "Core" || 
+                            m.PackageId == "ludeon.rimworld");
+                        
+                        if (coreMod != null)
+                        {
+                            Log.Message("[KCSG Unbound] Force scanning Core mod for structures");
+                            SymbolRegistryCache.AddModToScanQueue(coreMod.PackageId, true);
+                        }
+                        
+                        // Get a list of VE mods that might have structures
+                        var veMods = LoadedModManager.RunningModsListForReading.Where(m => 
+                            m.Name.Contains("Vanilla Expanded") || 
+                            m.PackageId.Contains("vanillaexpanded") ||
+                            m.PackageId.Contains("oskar.vfe") ||
+                            m.PackageId.Contains("oskarpotocki.vfe"));
+                        
+                        foreach (var veMod in veMods.Take(3)) // Limit to first 3 to avoid overloading
+                        {
+                            Log.Message($"[KCSG Unbound] Force scanning VE mod: {veMod.Name}");
+                            SymbolRegistryCache.AddModToScanQueue(veMod.PackageId, true);
+                        }
+                    }
+                    catch (Exception scanEx)
+                    {
+                        Log.Warning($"[KCSG Unbound] Error during priority mod scanning: {scanEx.Message}");
+                    }
+                }
+                catch (Exception cacheEx)
+                {
+                    Log.Warning($"[KCSG Unbound] Error initializing cache system: {cacheEx.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -270,20 +452,29 @@ namespace KCSG
         {
             try
             {
-                Diagnostics.LogVerbose("Pre-registering common layout names...");
+                Log.Message("[KCSG Unbound] Pre-registering common layout names...");
                 
                 // Common prefixes that appear in cross-references
                 string[] commonPrefixes = new[] { 
                     "VFED_", "VFEA_", "VFEC_", "VFEE_", "VFEM_", "VFET_", "VFE_", "VFEI_", "FTC_", 
-                    "RBME_", "AG_", "BM_", "BS_", "MM_", "VC_", "VE_", "VM_", "VBGE_"
+                    "RBME_", "AG_", "BM_", "BS_", "MM_", "VC_", "VE_", "VM_", "VBGE_", "RM_",
+                    "DMS_", "DMSAC_", "SEX_", "FT_"
                 };
                 
                 // Get common base names from the log file cross-references
                 string[] commonBaseNames = new[] { 
                     "CitadelBunkerStart", "LargeBallroomA", "SurveillanceStationF", "ServantQuartersA",
                     "GrandNobleThroneRoomA", "LargeNobleBedroomA", "TechPrinterMainA", "UnderfarmMainA",
-                    "ShuttleLandingPadA", "AerodroneStationA", "ImperialConvoyA", "StockpileDepotA"
+                    "ShuttleLandingPadA", "AerodroneStationA", "ImperialConvoyA", "StockpileDepotA",
+                    // Add more common structure names
+                    "Structure", "Layout", "Camp", "Base", "Outpost", "Settlement", "Tower",
+                    "Bunker", "Fortress", "Castle", "Wall", "Room", "Building", "House",
+                    "Factory", "Farm", "Barracks", "Storage", "PowerPlant", "Laboratory",
+                    "Kitchen", "Bedroom", "Stockpile", "Workshop", "DefensivePosition"
                 };
+                
+                // Count how many structures were registered
+                int registeredCount = 0;
                 
                 // Create permutations of base names and prefixes
                 foreach (var prefix in commonPrefixes) 
@@ -298,8 +489,11 @@ namespace KCSG
                             {
                                 var placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
                                 SymbolRegistry.RegisterDef(defName, placeholderDef);
+                                registeredCount++;
                             }
-                            catch {}
+                            catch (Exception ex) {
+                                Diagnostics.LogDiagnostic($"Error registering {defName}: {ex.Message}");
+                            }
                             
                             // Also register variants with suffixes
                             foreach (var suffix in new[] { "_A", "_B", "_C", "_D", "Alpha", "Beta", "Gamma", "Delta" })
@@ -311,15 +505,58 @@ namespace KCSG
                                     {
                                         var placeholderDef = SymbolRegistry.CreatePlaceholderDef(variantName);
                                         SymbolRegistry.RegisterDef(variantName, placeholderDef);
+                                        registeredCount++;
                                     }
                                 }
-                                catch {}
+                                catch (Exception ex) {
+                                    Diagnostics.LogDiagnostic($"Error registering variant {variantName}: {ex.Message}");
+                                }
                             }
+                        }
+                    }
+                    
+                    // Also register common numbered variants for each prefix
+                    for (int i = 1; i <= 10; i++)
+                    {
+                        string numDefName = $"{prefix}Structure{i}";
+                        try
+                        {
+                            if (!SymbolRegistry.IsDefRegistered(numDefName))
+                            {
+                                var placeholderDef = SymbolRegistry.CreatePlaceholderDef(numDefName);
+                                SymbolRegistry.RegisterDef(numDefName, placeholderDef);
+                                registeredCount++;
+                            }
+                        }
+                        catch (Exception ex) {
+                            Diagnostics.LogDiagnostic($"Error registering numbered {numDefName}: {ex.Message}");
                         }
                     }
                 }
                 
-                Diagnostics.LogVerbose($"Pre-registered common layout names, total defs: {SymbolRegistry.RegisteredDefCount}");
+                // Directly force register some basic layout names without prefixes as a last resort
+                string[] basicLayouts = new[] {
+                    "BaseStructure", "SimpleLayout", "BasicBase", "StandardCamp", "DefaultOutpost",
+                    "GenericHouse", "StandardBuilding", "BasicRoom", "SimpleStructure", "DefaultLayout"
+                };
+                
+                foreach (var layout in basicLayouts)
+                {
+                    try
+                    {
+                        if (!SymbolRegistry.IsDefRegistered(layout))
+                        {
+                            var placeholderDef = SymbolRegistry.CreatePlaceholderDef(layout);
+                            SymbolRegistry.RegisterDef(layout, placeholderDef);
+                            registeredCount++;
+                        }
+                    }
+                    catch (Exception ex) {
+                        Diagnostics.LogDiagnostic($"Error registering basic layout {layout}: {ex.Message}");
+                    }
+                }
+                
+                Log.Message($"[KCSG Unbound] Pre-registered {registeredCount} placeholder layout names (total defs: {SymbolRegistry.RegisteredDefCount})");
             }
             catch (Exception ex)
             {
@@ -2393,6 +2630,185 @@ namespace KCSG
         }
         
         /// <summary>
+        /// Explicitly initializes and registers Reinforced Mechanoids 2 layouts
+        /// </summary>
+        private static void InitializeReinforcedMechanoidsLayouts()
+        {
+            try
+            {
+                Log.Message("[KCSG Unbound] Implementing enhanced registration for Reinforced Mechanoids 2 layouts");
+                
+                if (!SymbolRegistry.Initialized)
+                {
+                    Log.Message("[KCSG Unbound] Initializing SymbolRegistry for Reinforced Mechanoids 2 layouts");
+                    SymbolRegistry.Initialize();
+                }
+                
+                // CHECK FOR REINFORCED MECHANOIDS 2 MOD BEING LOADED
+                bool rmModLoaded = LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Reinforced Mech") || 
+                    m.PackageId.Contains("reinforcedmechanoids") ||
+                    m.PackageId.Contains("rm2"));
+                    
+                if (rmModLoaded)
+                {
+                    Log.Message("[KCSG Unbound] Reinforced Mechanoids 2 mod is loaded - implementing comprehensive structure registration");
+                    
+                    // Track the defs we create
+                    int count = 0;
+                    HashSet<string> registeredNames = new HashSet<string>();
+                    
+                    // Load critical base names for Reinforced Mechanoids
+                    List<string> criticalBaseNames = new List<string>
+                    {
+                        // Main mechanoid structures
+                        "Base", "Camp", "Outpost", "Bunker", "Hive", "Nest",
+                        "Factory", "Barracks", "Hangar", "Fabricator", "Assembler",
+                        "Armory", "Laboratory", "Command", "Station", "Sentinel",
+                        
+                        // Specific mechanoid types from the mod
+                        "Behemoth", "Buffer", "Caretaker", "Falcon", "Gremlin", 
+                        "Harpy", "Locust", "Marshal", "Matriarch", "Ranger",
+                        "Sentinel", "SentinelBrawler", "Spartan", "Vulture", 
+                        "Wraith", "Zealot", "ZealotAssassin"
+                    };
+                    
+                    // SYSTEMATIC APPROACH: Generate all common naming variants for each structure
+                    foreach (string baseName in criticalBaseNames)
+                    {
+                        // PRIMARY NAMING: RM_BaseName
+                        string primaryDefName = $"RM_{baseName}";
+                        
+                        // NAMING PATTERNS - These are all the formats that could be used for references
+                        List<string> allNamingPatterns = new List<string>();
+                        
+                        // 1. Standard pattern with prefix
+                        allNamingPatterns.Add(primaryDefName);
+                        
+                        // 2. Letter suffixes (A-Z) - standard variation for most structures
+                        for (char letter = 'A'; letter <= 'Z'; letter++)
+                        {
+                            allNamingPatterns.Add($"{primaryDefName}{letter}");
+                        }
+                        
+                        // 3. Numbered variants for specific structures
+                        for (int i = 1; i <= 10; i++)
+                        {
+                            allNamingPatterns.Add($"{primaryDefName}{i}");
+                        }
+                        
+                        // 4. Common suffix variations
+                        string[] suffixes = new[] { "Layout", "Structure", "Base", "Main", "Complex" };
+                        foreach (string suffix in suffixes)
+                        {
+                            allNamingPatterns.Add($"{primaryDefName}{suffix}");
+                        }
+                        
+                        // 5. Alternative prefixing styles that some mods might use
+                        string[] prefixingStyles = new[] 
+                        {
+                            $"Structure_RM_{baseName}", 
+                            $"Layout_RM_{baseName}",
+                            $"StructureLayout_RM_{baseName}",
+                            $"RM_Structure_{baseName}",
+                            $"RM_Layout_{baseName}",
+                            $"RM.{baseName}"
+                        };
+                        
+                        foreach (string style in prefixingStyles)
+                        {
+                            allNamingPatterns.Add(style);
+                        }
+                        
+                        // ADD ALL THE NAMING VARIANTS USING MULTIPLE FALLBACK METHODS
+                        foreach (string defName in allNamingPatterns)
+                        {
+                            try
+                            {
+                                // Skip if already registered
+                                if (SymbolRegistry.IsDefRegistered(defName) || registeredNames.Contains(defName))
+                                    continue;
+                                
+                                // Register the def
+                                object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                                SymbolRegistry.RegisterDef(defName, placeholderDef);
+                                count++;
+                                registeredNames.Add(defName);
+                            }
+                            catch (Exception ex)
+                            {
+                                // Try with basic placeholder if the standard method fails
+                                try
+                                {
+                                    var basicPlaceholder = new BasicPlaceholderDef { defName = defName };
+                                    SymbolRegistry.RegisterDef(defName, basicPlaceholder);
+                                    count++;
+                                    registeredNames.Add(defName);
+                                }
+                                catch
+                                {
+                                    // Log only occasionally to avoid spam
+                                    if (count % 50 == 0)
+                                    {
+                                        Log.Warning($"[KCSG Unbound] Failed to register {defName}: {ex.Message}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Also register compound variants
+                    string[] compoundNames = new[]
+                    {
+                        "MechBase", "MechHive", "MechNest", "MechOutpost", "MechStation",
+                        "MechFactory", "AssemblyComplex", "CommandCenter", "DefensePost"
+                    };
+                    
+                    foreach(var name in compoundNames)
+                    {
+                        string defName = $"RM_{name}";
+                        if (!SymbolRegistry.IsDefRegistered(defName) && !registeredNames.Contains(defName))
+                        {
+                            try
+                            {
+                                object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                                SymbolRegistry.RegisterDef(defName, placeholderDef);
+                                count++;
+                                registeredNames.Add(defName);
+                            }
+                            catch (Exception ex)
+                            {
+                                // Try with basic placeholder
+                                try
+                                {
+                                    var basicPlaceholder = new BasicPlaceholderDef { defName = defName };
+                                    SymbolRegistry.RegisterDef(defName, basicPlaceholder);
+                                    count++;
+                                    registeredNames.Add(defName);
+                                }
+                                catch 
+                                {
+                                    Log.Warning($"[KCSG Unbound] Failed to register {defName}: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                    
+                    Log.Message($"[KCSG Unbound] Registered {count} Reinforced Mechanoids 2 structure variants");
+                }
+                else
+                {
+                    // If the mod isn't loaded, log this but don't register structures
+                    Log.Message("[KCSG Unbound] Reinforced Mechanoids 2 mod is NOT loaded - skipping structure registration");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error initializing Reinforced Mechanoids 2 layouts: {ex}");
+            }
+        }
+        
+        /// <summary>
         /// Scans a general VFE mod for structure layouts
         /// </summary>
         private static void ScanVFEMod(string modName, string altModName, string workshopId, 
@@ -2614,5 +3030,452 @@ namespace KCSG
         /// Override SettingsCategory to avoid creating a settings button
         /// </summary>
         public override string SettingsCategory() => null;
+        
+        /// <summary>
+        /// Dead Man's Switch implementation
+        /// </summary>
+        private static void InitializeDeadMansSwitchLayouts()
+        {
+            try
+            {
+                Log.Message("[KCSG Unbound] Implementing enhanced registration for Dead Man's Switch layouts");
+                
+                if (!SymbolRegistry.Initialized)
+                {
+                    Log.Message("[KCSG Unbound] Initializing SymbolRegistry for Dead Man's Switch layouts");
+                    SymbolRegistry.Initialize();
+                }
+                
+                // CHECK FOR DEAD MAN'S SWITCH MOD BEING LOADED
+                bool dmsModLoaded = LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Dead Man's Switch") || 
+                    m.PackageId.Contains("3469398006") ||
+                    m.PackageId.Contains("aoba.deadmanswitch"));
+                    
+                if (dmsModLoaded)
+                {
+                    Log.Message("[KCSG Unbound] Dead Man's Switch mod is loaded - registering prefixes");
+                    
+                    string[] dmsPrefixes = new[] {
+                        "DMS_ChunkSlag", "DMS_Mech_Mushketer", "DMS_Mech_Zabor", 
+                        "DMS_Mech_Dogge", "DMS_Mech_Ape", "DMS_Mech_Arquebusier",
+                        "DMS_Mech_BattleFrame", "DMS_Mech_Caretta", "DMS_Mech_Dogge",
+                        "DMS_Mech_EscortLifter", "DMS_Mech_Falcon", "DMS_Mech_FieldCommand",
+                        "DMS_Mech_Gecko", "DMS_Mech_Geochelone", "DMS_Mech_Gladiator",
+                        "DMS_Mech_Grenadier", "DMS_Mech_HermitCrab", "DMS_Machine_Hound",
+                        "DMS_Mech_Iguana", "DMS_Mech_Jaeger", "DMS_Mech_Kanonier",
+                        "DMS_Mech_Killdozer", "DMS_Mech_Lady", "DMS_Mech_Noctula",
+                        "DMS_Structure", "DMS_Camp", "DMS_Base", "DMS_Army",
+                        "DMSAC_Building_DerelictMech", "DMSAC_Building_DeactivatedLargeMech",
+                        "DMSAC_Building_DeactivatedMediumMech", "DMSAC_Building_DeactivatedSmallMech",
+                        "DMSAC_Graveyard", "DMSAC_Base", "DMSAC_Structure"
+                    };
+                    
+                    foreach (var prefix in dmsPrefixes)
+                    {
+                        RegisterWithVariations(prefix);
+                    }
+                    
+                    Log.Message("[KCSG Unbound] Dead Man's Switch prefixes registered");
+                }
+                else
+                {
+                    // If the mod isn't loaded, log this but don't register structures
+                    Log.Message("[KCSG Unbound] Dead Man's Switch mod is NOT loaded - skipping structure registration");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error initializing Dead Man's Switch layouts: {ex}");
+            }
+        }
+        
+        /// <summary>
+        /// Mechanitor Encounters implementation
+        /// </summary>
+        private static void InitializeMechanitorEncountersLayouts()
+        {
+            try
+            {
+                Log.Message("[KCSG Unbound] Implementing enhanced registration for Mechanitor Encounters layouts");
+                
+                if (!SymbolRegistry.Initialized)
+                {
+                    Log.Message("[KCSG Unbound] Initializing SymbolRegistry for Mechanitor Encounters layouts");
+                    SymbolRegistry.Initialize();
+                }
+                
+                // CHECK FOR MECHANITOR ENCOUNTERS MOD BEING LOADED
+                bool sexModLoaded = LoadedModManager.RunningModsListForReading.Any(m => 
+                    m.Name.Contains("Mechanitor Encounters") || 
+                    m.PackageId.Contains("3417287863"));
+                    
+                if (sexModLoaded)
+                {
+                    Log.Message("[KCSG Unbound] Mechanitor Encounters mod is loaded - registering prefixes");
+                    
+                    string[] sexPrefixes = new[] {
+                        "SEX_MechArrayNode", "SEX_MechTeleporter", "SEX_MechResurrector",
+                        "SEX_EgoProjector", "SEX_MassMind", "SEX_MechanitorResourceCrate",
+                        "SEX_MechanitorMedicalCrate", "SEX_Mechanitor", "SEX_MechanitorEgoProjector",
+                        "SEX_Legionary", "SEX_Apocriton", "SEX_Lifter", "SEX_Warqueen",
+                        "SEX_Centurion", "SEX_CentipedeBlaster", "SEX_Lancer", "SEX_Scyther",
+                        "SEX_Militor", "SEX_MakeshiftChargeTurret", "SEX_JunkyardComponentCrate",
+                        "SEX_JunkyardResourceCrateVertical", "SEX_JunkyardResourceCrateHorizontal",
+                        "SEX_Junkyard"
+                    };
+                    
+                    foreach (var prefix in sexPrefixes)
+                    {
+                        RegisterWithVariations(prefix);
+                    }
+                    
+                    // Also register any layout names from Mechanitor Encounters
+                    string[] layoutNames = new[] {
+                        "SEX_MechanitorBaseOne", "SEX_MechanitorBaseTwo", "SEX_MechanitorBaseThree",
+                        "SEX_MechanitorBaseFour", "SEX_MechanitorBaseFive", "SEX_MechanitorBaseSite",
+                        "SEX_JunkyardOne", "SEX_JunkyardTwo", "SEX_JunkyardThree", "SEX_JunkyardFour"
+                    };
+                    
+                    foreach (var layoutName in layoutNames)
+                    {
+                        if (!SymbolRegistry.IsDefRegistered(layoutName))
+                        {
+                            try
+                            {
+                                var placeholderDef = SymbolRegistry.CreatePlaceholderDef(layoutName);
+                                SymbolRegistry.RegisterDef(layoutName, placeholderDef);
+                            }
+                            catch {}
+                        }
+                    }
+                    
+                    Log.Message("[KCSG Unbound] Mechanitor Encounters prefixes registered");
+                }
+                else
+                {
+                    // If the mod isn't loaded, log this but don't register structures
+                    Log.Message("[KCSG Unbound] Mechanitor Encounters mod is NOT loaded - skipping structure registration");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error initializing Mechanitor Encounters layouts: {ex}");
+            }
+        }
+        
+        /// <summary>
+        /// Helper method to register a prefix with common variations
+        /// </summary>
+        private static void RegisterWithVariations(string prefix)
+        {
+            // Use the centralized implementation from RimWorldCompatibility
+            RimWorldCompatibility.RegisterWithVariations(prefix);
+        }
+
+        /// <summary>
+        /// Schedule known mods for priority scanning
+        /// </summary>
+        private void ScheduleKnownModsForScanning()
+        {
+            // Register common mod IDs for priority scanning
+            string[] knownModIds = new string[]
+            {
+                "oskar.vfecore", // Vanilla Expanded Core
+                "oskar.vfemechanoids", // VFE Mechanoids
+                "oskarpotocki.vfe.deserters", // VFE Deserters
+                "oskarpotocki.vfe.classical", // VFE Classical
+                "oskarpotocki.vfe.insectoids", // VFE Insectoids
+                "oskarpotocki.vfe.vikings", // VFE Vikings
+                "oskarpotocki.vfe.ancients", // VFE Ancients
+                "vanillaexpanded.vfecore", // VE Core
+                "brrainz.achtung", // Achtung!
+                "frozensnowfox.betterancestraltree", // Better Ancestral Tree
+                "vanillaexpanded.vanillatraitsexpanded", // VTE
+                "vanillaexpanded.vbookse", // Books Expanded
+                "vanillaexpanded.vee", // Vanilla Events Expanded
+                "vanillaexpanded.outposts", // Outposts
+                "vanillaexpanded.vfemedical", // Medical
+                "vanillaexpanded.vfesecurity", // Security
+                "vanillaexpanded.vfeproduction", // Production
+                "vanillaexpanded.vfeart", // Art
+                "vanillaexpanded.vwe", // Weapons Expanded
+                "vanillaexpanded.vwel", // Laser Weapons
+                "vanillaexpanded.vwehw", // Heavy Weapons
+                "vanillaexpanded.vfepropsanddecor", // Props and Decor
+                "vanillaexpanded.vfefurniture", // Furniture
+                "vanillaexpanded.vfepower", // Power
+                "vanillaexpanded.vfefarming", // Farming
+                "vanillaexpanded.vfecooking", // Cooking
+                "oskarpotocki.vanillaexpanded.royaltypatches", // Royalty Patches
+                "oskarpotocki.vanillaexpanded.ideologypatches", // Ideology Patches
+                "vanillaexpanded.vwenl", // Non-lethal
+                "rimworld.3469398006", // Dead Man's Switch
+                "rimworld.3417287863", // Mechanitor Encounters
+                "reinforcedmechanoids" // Reinforced Mechanoids 2
+            };
+            
+            // Schedule these mods for scanning with high priority
+            foreach (var modId in knownModIds)
+            {
+                SymbolRegistryCache.AddModToScanQueue(modId, true);
+            }
+        }
+
+        /// <summary>
+        /// Load structures for a specific mod with optimization and caching
+        /// </summary>
+        private void LoadModSpecificStructures(string modId, ModContentPack mod)
+        {
+            try
+            {
+                // Call the specialized method based on mod ID
+                if (modId.Contains("vfe") || modId.Contains("vanilla") || modId.Contains("expanded"))
+                {
+                    // VE family mods
+                    if (modId.Contains("deserters") || modId.Contains("3440971742") || modId.Contains("vfedeserters"))
+                    {
+                        InitializeVFEDesertersLayouts();
+                    }
+                    else if (modId.Contains("vbge") || modId.Contains("vanillabooksexpanded") || modId.Contains("2193152410"))
+                    {
+                        InitializeVBGELayouts();
+                    }
+                    else if (modId.Contains("alphabooks") || modId.Contains("alpha.books") || modId.Contains("3403180654"))
+                    {
+                        InitializeAlphaBooksLayouts();
+                    }
+                    else if (modId.Contains("mechanoids") || modId.Contains("vfem"))
+                    {
+                        InitializeVFEMechanoidLayouts();
+                    }
+                    else if (modId.Contains("medieval") || modId.Contains("vfemedieval"))
+                    {
+                        InitializeVFEMedievalLayouts();
+                    }
+                    else if (modId.Contains("saveourship") || modId.Contains("sos2"))
+                    {
+                        InitializeSaveOurShip2Layouts();
+                    }
+                    else if (modId.Contains("outposts") || modId.Contains("vanillaoutposts"))
+                    {
+                        InitializeVanillaOutpostsLayouts();
+                    }
+                    else if (modId.Contains("ancients") || modId.Contains("vfeancients"))
+                    {
+                        InitializeVFEAncientsLayouts();
+                    }
+                    else if (modId.Contains("insectoids") || modId.Contains("vfeinsectoids"))
+                    {
+                        InitializeVFEInsectoidsLayouts();
+                    }
+                    else if (modId.Contains("classical") || modId.Contains("vfeclassical"))
+                    {
+                        InitializeVFEClassicalLayouts();
+                    }
+                }
+                else if (modId.Contains("fortress") || modId.Contains("ft_") || modId.Contains("ftc_"))
+                {
+                    InitializeFortressLayouts();
+                }
+                else if (modId.Contains("deadmanswitch") || modId.Contains("3469398006") || modId.Contains("aoba.deadmanswitch"))
+                {
+                    InitializeDeadMansSwitchLayouts();
+                }
+                else if (modId.Contains("mechanitorencounters") || modId.Contains("3417287863"))
+                {
+                    InitializeMechanitorEncountersLayouts();
+                }
+                else if (modId.Contains("reinforcedmechanoids") || modId.Contains("rm2"))
+                {
+                    InitializeReinforcedMechanoidsLayouts();
+                }
+                else
+                {
+                    // Generic structure loading for other mods
+                    LoadGenericModStructures(modId);
+                }
+                
+                // Schedule this mod for full scanning later if needed
+                if (KCSGUnboundSettings.EnableFullScanning)
+                {
+                    SymbolRegistryCache.AddModToScanQueue(modId, false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[KCSG Unbound] Error loading mod-specific structures for {modId}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Register native symbols with the SymbolRegistry
+        /// </summary>
+        private void RegisterNativeSymbols()
+        {
+            try
+            {
+                // Register standard native KCSG symbols
+                Log.Message("[KCSG Unbound] Registering native symbols");
+                
+                // Native symbols from the base KCSG library
+                List<string> nativeSymbols = new List<string>
+                {
+                    // Core structure resolvers
+                    "randomDoor", "door", "doubleDoor", "monument", "monumentMarker",
+                    "bed", "bedPair", "storage", "bench", "light", "animalNet", "animalBed",
+                    "moundDoor", "barricades", "mound", "moundWall", "naturalWall",
+                    "smoothNaturalWall", "path", "path_go", "openingSymbol", "newEvent",
+                    "empty", "unfoggable", "unroofed", "roofed", "roomHediff", "animalOnly",
+                    "droppable", "neverDrop", "itemHediff", "hediff", "neverSpawn",
+                    "plantGenerator", "replantable", "colonyCenter", "colonyEdge",
+                    
+                    // Core style symbols
+                    "null", "clear", "natural", "blocked", "none", "forbidden", "unroofed", "water",
+                    "marsh", "bridge", "colonyBuilding", "colonyBuildable", "road", "floor", "floored",
+                    "wall", "wallStuff", "wallType", "door", "window", "column", "lamp", "furniture",
+                    "building", "bridge", "wallLight", "indoorLamp", "outdoorLamp", "roofSupport",
+                    
+                    // Faction and structure markers
+                    "factionTheme", "factionBase", "factionCenter", "factionBorder", 
+                    "barrier", "borderBarrier", "borderWall", "borderFence", "borderHedge",
+                    "factionDefense", "factionStorage", "factionPower", "factionResource",
+                    "factionProduction", "factionMilitary", "factionMedical", "factionResearch",
+                    "factionLiving", "factionRecreation", "factionReligion", "factionPrisoner",
+                    "factionSlave", "factionAnimal", "factionFarm", "factionWorkshop"
+                };
+                
+                // Register each native symbol
+                foreach (var symbol in nativeSymbols)
+                {
+                    if (!SymbolRegistry.IsDefRegistered(symbol))
+                    {
+                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(symbol);
+                        SymbolRegistry.RegisterDef(symbol, placeholderDef);
+                    }
+                }
+                
+                Log.Message($"[KCSG Unbound] Registered {nativeSymbols.Count} native symbols");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error registering native symbols: {ex}");
+            }
+        }
+
+        // Add missing InitializeFortressLayouts
+        private static void InitializeFortressLayouts()
+        {
+            try
+            {
+                Log.Message("[KCSG Unbound] Implementing enhanced registration for Fortress/Citadel layouts");
+                
+                // Register FT_ and FTC_ prefixes for Fortress/Citadel mods
+                string[] ftPrefixes = new[] {
+                    "FT_", "FTC_", "Fortress_", "Citadel_", "FT_BlocksConcrete", 
+                    "FTC_CitadelWall", "FTC_CitadelBlock", "FTC_Citadel"
+                };
+                
+                foreach (var prefix in ftPrefixes)
+                {
+                    RegisterWithVariations(prefix);
+                }
+                
+                // Also register compound prefixes known to be used
+                string[] compoundNames = new[]
+                {
+                    "FTC_CitadelWall_FT_BlocksConcrete",
+                    "FTC_CitadelBlock_FT_BlocksConcrete", 
+                    "FT_BlocksConcrete_Wall",
+                    "FT_BlocksConcrete_Floor",
+                    "FT_BlocksConcrete_Door"
+                };
+                
+                foreach(var name in compoundNames)
+                {
+                    if (!SymbolRegistry.IsDefRegistered(name))
+                    {
+                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(name);
+                        SymbolRegistry.RegisterDef(name, placeholderDef);
+                    }
+                }
+                
+                Log.Message("[KCSG Unbound] Fortress/Citadel prefixes registered");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error initializing Fortress/Citadel layouts: {ex}");
+            }
+        }
+
+        // Add missing PreregisterCommonStructureNames method
+        /// <summary>
+        /// Pre-register common structure names with prefixes
+        /// </summary>
+        private void PreregisterCommonStructureNames(string prefix)
+        {
+            // Skip if empty prefix
+            if (string.IsNullOrEmpty(prefix)) return;
+            
+            // Common structure types to register
+            string[] structureTypes = new[] {
+                "Structure", "Layout", "Building", "Base", "Camp", "Settlement", 
+                "Outpost", "Hive", "Nest", "Site", "Bunker", "Tower"
+            };
+            
+            // Register each combination
+            foreach (var type in structureTypes)
+            {
+                string defName = $"{prefix}{type}";
+                if (!SymbolRegistry.IsDefRegistered(defName))
+                {
+                    try
+                    {
+                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                        SymbolRegistry.RegisterDef(defName, placeholderDef);
+                    }
+                    catch {}
+                }
+                
+                // Also register numbered variants 1-5
+                for (int i = 1; i <= 5; i++)
+                {
+                    string numberedName = $"{defName}{i}";
+                    if (!SymbolRegistry.IsDefRegistered(numberedName))
+                    {
+                        try
+                        {
+                            object placeholderDef = SymbolRegistry.CreatePlaceholderDef(numberedName);
+                            SymbolRegistry.RegisterDef(numberedName, placeholderDef);
+                        }
+                        catch {}
+                    }
+                }
+                
+                // Also register lettered variants A-E
+                for (char c = 'A'; c <= 'E'; c++)
+                {
+                    string letteredName = $"{defName}{c}";
+                    if (!SymbolRegistry.IsDefRegistered(letteredName))
+                    {
+                        try
+                        {
+                            object placeholderDef = SymbolRegistry.CreatePlaceholderDef(letteredName);
+                            SymbolRegistry.RegisterDef(letteredName, placeholderDef);
+                        }
+                        catch {}
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Load generic mod structures by using the SafeStart implementation
+        /// </summary>
+        private void LoadGenericModStructures(string modId)
+        {
+            // Use SafeStart's implementation for generic mod loading
+            SafeStart.LoadGenericModStructures(modId);
+        }
     }
 } 
