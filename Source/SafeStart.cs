@@ -5,889 +5,619 @@ using UnityEngine;
 using Verse;
 using HarmonyLib;
 using System.Linq;
+using System.Linq.Expressions;
+using System.IO;
+using System.Xml;
+using RimWorld;
 
 namespace KCSG
 {
     /// <summary>
-    /// Handles safe initialization of the mod to prevent startup crashes
+    /// Provides safe initialization for KCSG Unbound
     /// </summary>
-    public class SafeStart : MonoBehaviour
+    public static class SafeStart
     {
-        // Singleton instance
-        private static SafeStart instance;
+        // For tracking initialization
+        private static bool initialized = false;
+        private static bool loadingPhaseComplete = false;
         
-        // Track initialization state
-        private bool initialized = false;
-        private bool initializationAttempted = false;
-        private bool harmonyInitialized = false;
-        private int retryCount = 0;
-        private const int MAX_RETRIES = 3;
+        // For tracking detected mods
+        private static HashSet<string> detectedModIds = new HashSet<string>();
         
-        // Track any startup errors
-        private List<string> startupErrors = new List<string>();
-        
-        // Harmony instance
-        private Harmony harmony;
+        // Common mod IDs to check for
+        private static readonly Dictionary<string, string> knownStructureModIds = new Dictionary<string, string>
+        {
+            { "oskar.vfe.deserter", "VFE Deserters" },
+            { "oskarpotocki.vfe.mechanoid", "VFE Mechanoids" },
+            { "vanillaexpanded.basegen", "VBGE" },
+            { "oskarpotocki.vfe.medieval", "VFE Medieval" },
+            { "ludeon.rimworld.shipshavecomeback", "Save Our Ship 2" },
+            { "oskarpotocki.vfe.outposts", "VFE Outposts" },
+            { "oskarpotocki.vfe.insectoids", "VFE Insectoids" },
+            { "oskarpotocki.vfe.classical", "VFE Classical" },
+            { "oskarpotocki.vfe.empire", "VFE Empire" },
+            { "3403180654", "Alpha Books" },
+            { "alphabooks", "Alpha Books" }
+        };
         
         /// <summary>
-        /// Initialize the singleton on game load
+        /// Initialize the mod with safety guards
         /// </summary>
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void Initialize()
+        public static void Initialize()
         {
             try
             {
-                // Create a persistent game object to host our MonoBehaviour
-                GameObject gameObject = new GameObject("KCSG_SafeStart");
-                DontDestroyOnLoad(gameObject);
+                if (initialized) return;
                 
-                // Add our component
-                instance = gameObject.AddComponent<SafeStart>();
+                // Diagnostic logging
+                Diagnostics.Initialize();
+                Diagnostics.LogDiagnostic("[KCSG Unbound] SafeStart Initialize() called");
                 
-                Log.Message("[KCSG Unbound] SafeStart initialized");
-            }
-            catch (Exception ex)
-            {
-                // This is critical - log it but don't throw
-                Log.Error($"[KCSG Unbound] Critical error initializing SafeStart: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Core initialization called in a safe context
-        /// </summary>
-        public void Start()
-        {
-            try
-            {
-                // Schedule the actual initialization for later
-                // This gives RimWorld time to fully initialize other systems
-                Invoke("DelayedInitialize", 2.0f);
+                // Start logging
+                Log.Message("[KCSG Unbound] Starting initialization");
                 
-                Log.Message("[KCSG Unbound] SafeStart scheduled delayed initialization");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error in Start: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Handles initialization after a delay
-        /// </summary>
-        private void DelayedInitialize()
-        {
-            try
-            {
-                if (initialized || initializationAttempted)
-                    return;
-                
-                initializationAttempted = true;
-                
-                // Check if Vanilla Factions Expanded - Deserters is loaded
-                bool desertersLoaded = IsDesertersModLoaded();
-                
-                // Initialize core registry first
+                // Initialize structures registry
                 if (!SymbolRegistry.Initialized)
                 {
-                    Log.Message("[KCSG Unbound] SafeStart initializing registry");
                     SymbolRegistry.Initialize();
                 }
                 
-                // If Deserters mod is loaded, force-preregister its structures before patching
-                if (desertersLoaded)
+                // Scan loaded mods to detect which structure sets we need
+                DetectActiveStructureMods();
+                
+                // Set up Harmony patches
+                SetupHarmony();
+                
+                // Start listening for game loading events
+                LongEventHandler.QueueLongEvent(OnGameLoadingComplete, "KCSG_InitComplete", false, null);
+                
+                initialized = true;
+                
+                Log.Message("[KCSG Unbound] Initialization complete, lazy loading scheduled");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error during safe initialization: {ex}");
+            }
+        }
+        
+        /// <summary>
+        /// Detects which structure-using mods are active
+        /// </summary>
+        private static void DetectActiveStructureMods()
+        {
+            try
+            {
+                Log.Message("[KCSG Unbound] Detecting active structure mods");
+                
+                // Clear existing detection data
+                detectedModIds.Clear();
+                
+                // Check all running mods
+                foreach (var mod in LoadedModManager.RunningModsListForReading)
                 {
-                    Log.Message("[KCSG Unbound] VFE Deserters detected - ensuring all structures preregistered");
-                    PreregisterDeserterStructures();
+                    foreach (var knownMod in knownStructureModIds)
+                    {
+                        if (mod.PackageId.Contains(knownMod.Key))
+                        {
+                            detectedModIds.Add(knownMod.Key);
+                            Log.Message($"[KCSG Unbound] Detected active structure mod: {knownMod.Value}");
+                        }
+                    }
+                    
+                    // Also check for mods with KCSG in their About.xml
+                    string aboutPath = Path.Combine(mod.RootDir, "About", "About.xml");
+                    if (File.Exists(aboutPath))
+                    {
+                        try
+                        {
+                            string aboutContent = File.ReadAllText(aboutPath);
+                            if (aboutContent.Contains("KCSG") || 
+                                aboutContent.Contains("Krypt's") || 
+                                aboutContent.Contains("structure generation"))
+                            {
+                                detectedModIds.Add(mod.PackageId);
+                                Log.Message($"[KCSG Unbound] Detected active structure mod: {mod.Name}");
+                            }
+                        }
+                        catch
+                        {
+                            // Skip if we can't read the About.xml
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[KCSG Unbound] Error detecting active structure mods: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Setup Harmony patching
+        /// </summary>
+        private static void SetupHarmony()
+        {
+            try
+            {
+                Log.Message("[KCSG Unbound] Setting up Harmony patches");
+                
+                // Create our Harmony instance
+                Harmony harmony = new Harmony("KCSG.Unbound");
+                
+                // Apply necessary patches
+                HarmonyPatches.ApplyPatches(harmony);
+                
+                Log.Message("[KCSG Unbound] Harmony patching complete");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error during Harmony setup: {ex}");
+            }
+        }
+        
+        /// <summary>
+        /// Called when game loading is complete
+        /// </summary>
+        private static void OnGameLoadingComplete()
+        {
+            if (loadingPhaseComplete) return;
+            
+            try
+            {
+                Log.Message("[KCSG Unbound] Game loading complete, performing delayed structure loading");
+                
+                // Load only the structures for mods that are actually active
+                foreach (var modId in detectedModIds)
+                {
+                    LoadModSpecificStructures(modId);
                 }
                 
-                // Check for VBGE mod and preregister structures if needed
-                bool vbgeLoaded = IsVBGEModLoaded();
-                if (vbgeLoaded)
+                loadingPhaseComplete = true;
+                
+                Log.Message("[KCSG Unbound] Delayed structure loading complete");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Error during delayed loading: {ex}");
+            }
+        }
+        
+        /// <summary>
+        /// Loads structures for a specific mod
+        /// </summary>
+        private static void LoadModSpecificStructures(string modId)
+        {
+            try
+            {
+                // Skip if no ID
+                if (string.IsNullOrEmpty(modId)) return;
+                
+                // Check for common mod IDs and load appropriate structures
+                if (modId.Contains("vfe.deserter"))
                 {
-                    Log.Message("[KCSG Unbound] VBGE detected - ensuring all structures preregistered");
-                    PreregisterVBGEStructures();
+                    LoadDesertersStructures();
                 }
-                
-                // Check for Alpha Books mod and preregister structures if needed
-                bool alphaBooksLoaded = IsAlphaBooksModLoaded();
-                if (alphaBooksLoaded)
+                else if (modId.Contains("vfe.mechanoid"))
                 {
-                    Log.Message("[KCSG Unbound] Alpha Books detected - ensuring all structures preregistered");
-                    PreregisterAlphaBooksStructures();
+                    LoadMechanoidStructures();
                 }
-                
-                // Check for VFE Mechanoids mod and preregister structures if needed
-                bool vfeMechanoidLoaded = IsVFEMechanoidModLoaded();
-                if (vfeMechanoidLoaded)
+                else if (modId.Contains("basegen"))
                 {
-                    Log.Message("[KCSG Unbound] VFE Mechanoids detected - ensuring all structures preregistered");
-                    PreregisterVFEMechanoidStructures();
+                    LoadVBGEStructures();
                 }
-                
-                // Check for VFE Medieval mod and preregister structures if needed
-                bool vfeMedievalLoaded = IsVFEMedievalModLoaded();
-                if (vfeMedievalLoaded)
+                else if (modId.Contains("vfe.medieval"))
                 {
-                    Log.Message("[KCSG Unbound] VFE Medieval detected - ensuring all structures preregistered");
-                    PreregisterVFEMedievalStructures();
+                    LoadMedievalStructures();
                 }
-                
-                // Check for Save Our Ship 2 mod and preregister structures if needed
-                bool sos2Loaded = IsSaveOurShipModLoaded();
-                if (sos2Loaded)
+                else if (modId.Contains("shipshavecomeback"))
                 {
-                    Log.Message("[KCSG Unbound] Save Our Ship 2 detected - ensuring all structures preregistered");
-                    PreregisterSaveOurShipStructures();
+                    LoadSOS2Structures();
                 }
-                
-                // Check for Vanilla Outposts Expanded mod and preregister structures if needed
-                bool voeLoaded = IsVanillaOutpostsModLoaded();
-                if (voeLoaded)
+                else if (modId.Contains("vfe.outposts"))
                 {
-                    Log.Message("[KCSG Unbound] Vanilla Outposts Expanded detected - ensuring all structures preregistered");
-                    PreregisterVanillaOutpostsStructures();
+                    LoadOutpostsStructures();
                 }
-                
-                // Check for VFE Ancients mod and preregister structures if needed
-                bool ancientsLoaded = IsVFEAncientsModLoaded();
-                if (ancientsLoaded)
+                else if (modId.Contains("vfe.insectoids"))
                 {
-                    Log.Message("[KCSG Unbound] VFE Ancients detected - ensuring all structures preregistered");
-                    PreregisterVFEAncientsStructures();
+                    LoadInsectoidsStructures();
                 }
-                
-                // Set up harmony patching
-                InitializeHarmony();
-                
-                // Perform a secondary registration of critical structures AFTER patching
-                // This helps ensure cross-references can be resolved
-                if (desertersLoaded)
+                else if (modId.Contains("vfe.classical"))
                 {
-                    Log.Message("[KCSG Unbound] Running secondary registration for VFE Deserters");
-                    PreregisterDeserterStructures();
+                    LoadClassicalStructures();
                 }
-                
-                if (vbgeLoaded)
+                else if (modId.Contains("vfe.empire"))
                 {
-                    Log.Message("[KCSG Unbound] Running secondary registration for VBGE");
-                    PreregisterVBGEStructures();
+                    LoadEmpireStructures();
                 }
-                
-                if (alphaBooksLoaded)
+                else if (modId.Contains("3403180654") || modId.Contains("alpha.books") || modId.Contains("alphabooks"))
                 {
-                    Log.Message("[KCSG Unbound] Running secondary registration for Alpha Books");
-                    PreregisterAlphaBooksStructures();
-                }
-                
-                if (vfeMechanoidLoaded)
-                {
-                    Log.Message("[KCSG Unbound] Running secondary registration for VFE Mechanoids");
-                    PreregisterVFEMechanoidStructures();
-                }
-                
-                if (vfeMedievalLoaded)
-                {
-                    Log.Message("[KCSG Unbound] Running secondary registration for VFE Medieval");
-                    PreregisterVFEMedievalStructures();
-                }
-                
-                if (sos2Loaded)
-                {
-                    Log.Message("[KCSG Unbound] Running secondary registration for Save Our Ship 2");
-                    PreregisterSaveOurShipStructures();
-                }
-                
-                if (voeLoaded)
-                {
-                    Log.Message("[KCSG Unbound] Running secondary registration for Vanilla Outposts Expanded");
-                    PreregisterVanillaOutpostsStructures();
-                }
-                
-                if (ancientsLoaded)
-                {
-                    Log.Message("[KCSG Unbound] Running secondary registration for VFE Ancients");
-                    PreregisterVFEAncientsStructures();
-                }
-                
-                // Mark as initialized if successful
-                initialized = harmonyInitialized && SymbolRegistry.Initialized;
-                
-                if (initialized)
-                {
-                    Log.Message("[KCSG Unbound] SafeStart successfully completed initialization");
+                    LoadAlphaBooksStructures();
                 }
                 else
                 {
-                    retryCount++;
-                    if (retryCount < MAX_RETRIES)
-                    {
-                        Log.Warning($"[KCSG Unbound] SafeStart initialization incomplete, scheduling retry {retryCount}/{MAX_RETRIES}");
-                        Invoke("DelayedInitialize", 2.0f);
-                    }
-                    else
-                    {
-                        Log.Error("[KCSG Unbound] SafeStart failed to initialize after multiple attempts");
-                    }
+                    // Generic structure loading for other mods
+                    LoadGenericModStructures(modId);
                 }
             }
             catch (Exception ex)
             {
-                LogStartupError($"Error in DelayedInitialize: {ex}");
+                Log.Warning($"[KCSG Unbound] Error loading structures for mod {modId}: {ex.Message}");
             }
         }
         
         /// <summary>
-        /// Set up Harmony patching safely
+        /// Load structures for VFE Deserters mod
         /// </summary>
-        private void InitializeHarmony()
+        private static void LoadDesertersStructures()
         {
-            if (harmonyInitialized)
-                return;
-                
-            try
+            Log.Message("[KCSG Unbound] Loading structures for VFE Deserters");
+            
+            // Load critical base names for Deserters
+            List<string> criticalBaseNames = new List<string>
             {
-                // Create a unique Harmony instance
-                harmony = new Harmony("kcsg.unbound.safestart");
+                // Main structures
+                "Underfarm", "UnderfarmMain", "NewSafehaven", "AerodroneStation",
+                "TechPrinter", "ShuttleStagingPost", "SupplyDepot", "ZeusCannonComplex",
+                "SurveillanceStation", "ImperialConvoy",
                 
-                // Apply only the minimal patches needed for functionality
-                ApplyMinimalPatches();
+                // Noble structures
+                "LargeNobleBallroom", "LargeNobleBedroom", "LargeNobleGallery",
+                "LargeNobleThroneRoom", "MediumNobleBallroom", "MediumNobleBedroom",
+                "MediumNobleGallery", "MediumNobleThroneRoom", "SmallNobleBedroom",
+                "SmallNobleThroneRoom", "GrandNobleThroneRoom",
                 
-                harmonyInitialized = true;
-                
-                Log.Message("[KCSG Unbound] SafeStart initialized Harmony safely");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error initializing Harmony: {ex}");
-            }
+                // Plot structures
+                "Bunker", "Courtyard", "Gardens", "KontarionEmplacement",
+                "OnagerEmplacement", "PalintoneEmplacement", "ServantQuarters",
+                "ShuttleLandingPad", "StockpileDepot"
+            };
+            
+            RegisterStructureVariants("VFED_", criticalBaseNames);
         }
         
         /// <summary>
-        /// Apply only the most critical patches to keep the game running
+        /// Load structures for VFE Mechanoids mod
         /// </summary>
-        private void ApplyMinimalPatches()
+        private static void LoadMechanoidStructures()
         {
-            try
+            Log.Message("[KCSG Unbound] Loading structures for VFE Mechanoids");
+            
+            // Load critical base names for Mechanoids
+            List<string> criticalBaseNames = new List<string>
             {
-                // Patch DefDatabase.Add for SymbolDef
-                var defDatabaseAddMethod = SafeFindMethod(typeof(DefDatabase<>), "Add");
-                if (defDatabaseAddMethod != null)
+                "Carrier", "CarrierDLC", "Frigate", "FrigateDLC", 
+                "Destroyer", "DestroyerDLC", "Cruiser", "CruiserDLC",
+                "BroadcastingStation"
+            };
+            
+            RegisterStructureVariants("VFEM_", criticalBaseNames);
+            
+            // Also register numbered variants
+            foreach (var baseName in criticalBaseNames)
+            {
+                for (int i = 1; i <= 20; i++)
                 {
-                    var prefixMethod = typeof(HarmonyPatches.Patch_DefDatabase_Add_SymbolDef)
-                        .GetMethod("PrefixAdd", BindingFlags.Public | BindingFlags.Static);
-                    
-                    if (prefixMethod != null)
+                    string defName = $"VFEM_{baseName}{i}";
+                    if (!SymbolRegistry.IsDefRegistered(defName))
                     {
-                        harmony.Patch(defDatabaseAddMethod, prefix: new HarmonyMethod(prefixMethod));
-                        Log.Message("[KCSG Unbound] SafeStart applied DefDatabase.Add patch");
+                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                        SymbolRegistry.RegisterDef(defName, placeholderDef);
                     }
                 }
+            }
+        }
+        
+        /// <summary>
+        /// Load structures for VBGE mod
+        /// </summary>
+        private static void LoadVBGEStructures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for Vanilla Base Generation Expanded");
+            
+            // Load critical base names for VBGE
+            List<string> criticalBaseNames = new List<string>
+            {
+                "Empire", "Production", "Mining", "Slavery",
+                "Logging", "Defence", "CentralEmpire", "Outlander",
+                "OutlanderProduction", "OutlanderMining", "OutlanderSlavery",
+                "OutlanderLogging", "OutlanderDefence", "OutlanderFields",
+                "TribalProduction", "TribalMining", "TribalSlavery",
+                "TribalLogging", "TribalDefence", "PiratesDefence",
+                "PirateSlavery"
+            };
+            
+            RegisterStructureVariants("VBGE_", criticalBaseNames);
+        }
+        
+        /// <summary>
+        /// Load structures for VFE Medieval mod
+        /// </summary>
+        private static void LoadMedievalStructures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for VFE Medieval");
+            
+            // Load critical base names for Medieval
+            List<string> criticalBaseNames = new List<string>
+            {
+                "Castle", "Hamlet", "Village", "Monastery",
+                "Keep", "Tower", "Hall", "Tavern", "Blacksmith",
+                "Barracks", "GuildHall", "ThroneRoom"
+            };
+            
+            RegisterStructureVariants("VFEM_", criticalBaseNames);
+        }
+        
+        /// <summary>
+        /// Load structures for SOS2 mod
+        /// </summary>
+        private static void LoadSOS2Structures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for Save Our Ship 2");
+            
+            // Load critical base names for SOS2
+            List<string> criticalBaseNames = new List<string>
+            {
+                "Ship", "Bridge", "Quarters", "Cargo",
+                "Hangar", "Engineering", "Weapons", "Shields"
+            };
+            
+            RegisterStructureVariants("SOS_", criticalBaseNames);
+        }
+        
+        /// <summary>
+        /// Load structures for VFE Outposts mod
+        /// </summary>
+        private static void LoadOutpostsStructures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for VFE Outposts");
+            
+            // Load critical base names for Outposts
+            List<string> criticalBaseNames = new List<string>
+            {
+                "Outpost", "Camp", "Base", "Settlement",
+                "Trading", "Military", "Mining", "Research"
+            };
+            
+            RegisterStructureVariants("VOE_", criticalBaseNames);
+        }
+        
+        /// <summary>
+        /// Load structures for VFE Insectoids mod
+        /// </summary>
+        private static void LoadInsectoidsStructures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for VFE Insectoids");
+            
+            // Load critical base names for Insectoids
+            List<string> criticalBaseNames = new List<string>
+            {
+                "Hive", "Nest", "Chamber", "Tunnels"
+            };
+            
+            RegisterStructureVariants("VFEI_", criticalBaseNames);
+        }
+        
+        /// <summary>
+        /// Load structures for VFE Classical mod
+        /// </summary>
+        private static void LoadClassicalStructures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for VFE Classical");
+            
+            // Load critical base names for Classical
+            List<string> criticalBaseNames = new List<string>
+            {
+                "Villa", "Temple", "Senate", "Barracks",
+                "Forum", "Baths", "Market", "Colosseum"
+            };
+            
+            RegisterStructureVariants("VFEC_", criticalBaseNames);
+        }
+        
+        /// <summary>
+        /// Load structures for VFE Empire mod
+        /// </summary>
+        private static void LoadEmpireStructures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for VFE Empire");
+            
+            // Load critical base names for Empire
+            List<string> criticalBaseNames = new List<string>
+            {
+                "Estate", "Palace", "Citadel", "Administration",
+                "Garrison", "ThroneRoom", "Chambers", "Court"
+            };
+            
+            RegisterStructureVariants("VFEE_", criticalBaseNames);
+        }
+        
+        /// <summary>
+        /// Load structures for a generic mod by looking at its XML files
+        /// </summary>
+        private static void LoadGenericModStructures(string modId)
+        {
+            // Find the mod in the running mods
+            ModContentPack mod = LoadedModManager.RunningModsListForReading.FirstOrDefault(m => 
+                m.PackageId.Contains(modId));
+            
+            if (mod == null) return;
+            
+            Log.Message($"[KCSG Unbound] Loading structures for {mod.Name}");
+            
+            // Check common folder patterns where structure layouts might be stored
+            string[] structureFolderPatterns = new[] {
+                "Defs/StructureDefs",
+                "Defs/StructureLayoutDefs",
+                "Defs/StructureGen",
+                "Defs/Structures",
+                "Defs/CustomGenDefs",
+                "Defs/CustomGenDefs/StructureLayoutDefs",
+                "Defs/SettlementLayoutDefs",
+                "Defs/SettlementDefs",
+                "Defs/LayoutDefs"
+            };
+            
+            // Track registered defNames to avoid duplicates
+            HashSet<string> registeredDefNames = new HashSet<string>();
+            
+            // Scan XML files for structure defs
+            foreach (string folder in structureFolderPatterns)
+            {
+                string folderPath = Path.Combine(mod.RootDir, folder);
+                if (!Directory.Exists(folderPath)) continue;
                 
-                // Patch DefDatabase.GetByShortHash for SymbolDef
-                var getByShortHashMethod = SafeFindMethod(typeof(DefDatabase<>), "GetByShortHash");
-                if (getByShortHashMethod != null)
+                foreach (string file in Directory.GetFiles(folderPath, "*.xml", SearchOption.AllDirectories))
                 {
-                    var getByShortHashPrefix = typeof(HarmonyPatches.Patch_DefDatabase_GetByShortHash_SymbolDef)
-                        .GetMethod("Prefix", BindingFlags.Public | BindingFlags.Static);
-                    
-                    if (getByShortHashPrefix != null)
+                    try
                     {
-                        harmony.Patch(getByShortHashMethod, prefix: new HarmonyMethod(getByShortHashPrefix));
-                        Log.Message("[KCSG Unbound] SafeStart applied GetByShortHash patch");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error applying minimal patches: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Safely find a method to patch
-        /// </summary>
-        private MethodInfo SafeFindMethod(Type genericType, string methodName)
-        {
-            try
-            {
-                foreach (var method in genericType.GetMethods(BindingFlags.Public | BindingFlags.Static))
-                {
-                    if (method.Name == methodName)
-                    {
-                        return method;
-                    }
-                }
-                return null;
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error finding method {methodName}: {ex}");
-                return null;
-            }
-        }
-        
-        /// <summary>
-        /// Log a startup error safely
-        /// </summary>
-        private void LogStartupError(string message)
-        {
-            try
-            {
-                startupErrors.Add(message);
-                Log.Error($"[KCSG Unbound] {message}");
-            }
-            catch
-            {
-                // Silently fail if even logging fails
-            }
-        }
-        
-        /// <summary>
-        /// Close the application if we've hit critical errors
-        /// </summary>
-        private void AbortStartup()
-        {
-            try
-            {
-                Log.Error("[KCSG Unbound] CRITICAL ERROR: Aborting game startup to prevent crashes");
-                Application.Quit();
-            }
-            catch
-            {
-                // Silently fail
-            }
-        }
-        
-        /// <summary>
-        /// Check if the Vanilla Factions Expanded - Deserters mod is loaded
-        /// </summary>
-        private bool IsDesertersModLoaded()
-        {
-            try
-            {
-                return LoadedModManager.RunningModsListForReading.Any(m => 
-                    m.Name.Contains("Deserter") || 
-                    m.PackageId.Contains("3025493377") || 
-                    m.PackageId.Contains("oskar.vfe.deserter"));
-            }
-            catch
-            {
-                // If we can't check, assume it might be loaded for safety
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Check if the Vanilla Base Generation Expanded mod is loaded
-        /// </summary>
-        private bool IsVBGEModLoaded()
-        {
-            try
-            {
-                return LoadedModManager.RunningModsListForReading.Any(m => 
-                    m.Name.Contains("Base Generation") || 
-                    m.PackageId.Contains("3209927822") || 
-                    m.PackageId.Contains("vanillaexpanded.basegen"));
-            }
-            catch
-            {
-                // If we can't check, assume it might be loaded for safety
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Check if the Alpha Books mod is loaded
-        /// </summary>
-        private bool IsAlphaBooksModLoaded()
-        {
-            try
-            {
-                return LoadedModManager.RunningModsListForReading.Any(m => 
-                    m.Name.Contains("Alpha Books") || 
-                    m.PackageId.Contains("3403180654"));
-            }
-            catch
-            {
-                // If we can't check, assume it might be loaded for safety
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Check if the VFE Mechanoids mod is loaded
-        /// </summary>
-        private bool IsVFEMechanoidModLoaded()
-        {
-            try
-            {
-                return LoadedModManager.RunningModsListForReading.Any(m => 
-                    m.Name.Contains("Mechanoid") || 
-                    m.PackageId.Contains("2329011599") || 
-                    m.PackageId.Contains("oskarpotocki.vfe.mechanoid") ||
-                    m.PackageId.Contains("oskarpotocki.vanillafactionsexpanded.mechanoid"));
-            }
-            catch
-            {
-                // If we can't check, assume it might be loaded for safety
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Check if the VFE Medieval mod is loaded
-        /// </summary>
-        private bool IsVFEMedievalModLoaded()
-        {
-            try
-            {
-                return LoadedModManager.RunningModsListForReading.Any(m => 
-                    m.Name.Contains("Medieval") || 
-                    m.PackageId.Contains("3444347874") || 
-                    m.PackageId.Contains("oskarpotocki.vfe.medieval") ||
-                    m.PackageId.Contains("oskarpotocki.vanillafactionsexpanded.medievalmodule"));
-            }
-            catch
-            {
-                // If we can't check, assume it might be loaded for safety
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Check if the Save Our Ship 2 mod is loaded
-        /// </summary>
-        private bool IsSaveOurShipModLoaded()
-        {
-            try
-            {
-                return LoadedModManager.RunningModsListForReading.Any(m => 
-                    m.Name.Contains("Save Our Ship") || 
-                    m.Name.Contains("SOS2") ||
-                    m.PackageId.Contains("1909914131") || 
-                    m.PackageId.Contains("ludeon.rimworld.shipshavecomeback") ||
-                    m.PackageId.Contains("lwm.shipshavecomeback"));
-            }
-            catch
-            {
-                // If we can't check, assume it might be loaded for safety
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Check if the Vanilla Outposts Expanded mod is loaded
-        /// </summary>
-        private bool IsVanillaOutpostsModLoaded()
-        {
-            try
-            {
-                return LoadedModManager.RunningModsListForReading.Any(m => 
-                    m.Name.Contains("Outpost") || 
-                    m.PackageId.Contains("2688941031") || 
-                    m.PackageId.Contains("oskarpotocki.vfe.outposts") ||
-                    m.PackageId.Contains("vanillaexpanded.outposts"));
-            }
-            catch
-            {
-                // If we can't check, assume it might be loaded for safety
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Check if the VFE Ancients mod is loaded
-        /// </summary>
-        private bool IsVFEAncientsModLoaded()
-        {
-            try
-            {
-                return LoadedModManager.RunningModsListForReading.Any(m => 
-                    m.Name.Contains("Ancients") || 
-                    m.PackageId.Contains("3444347874") || 
-                    m.PackageId.Contains("oskarpotocki.vfe.ancients"));
-            }
-            catch
-            {
-                // If we can't check, assume it might be loaded for safety
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Explicitly preregister critical structures from the Deserters mod
-        /// </summary>
-        private void PreregisterDeserterStructures()
-        {
-            try
-            {
-                // The most critical structures causing issues in player.log
-                string[] criticalStructures = new[]
-                {
-                    // Underfarm structures
-                    "VFED_UnderfarmMainA", "VFED_UnderfarmMainB", "VFED_UnderfarmMainC",
-                    "VFED_UnderfarmA", "VFED_UnderfarmB", "VFED_UnderfarmC", "VFED_UnderfarmD", 
-                    "VFED_UnderfarmE", "VFED_UnderfarmF", "VFED_UnderfarmG", "VFED_UnderfarmH",
-                    
-                    // NewSafehaven structures
-                    "VFED_NewSafehaven1", "VFED_NewSafehaven2", "VFED_NewSafehaven3", 
-                    "VFED_NewSafehaven4", "VFED_NewSafehaven5", "VFED_NewSafehaven6",
-                    
-                    // Other critical structures
-                    "VFED_AerodroneStationA", "VFED_TechPrinterA", "VFED_ShuttleStagingPostA",
-                    "VFED_SupplyDepotA", "VFED_SurveillanceStationA", "VFED_ImperialConvoyA",
-                    "VFED_ZeusCannonComplexA"
-                };
-                
-                int registered = 0;
-                foreach (var structureName in criticalStructures)
-                {
-                    if (!SymbolRegistry.IsDefRegistered(structureName))
-                    {
-                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(structureName);
-                        SymbolRegistry.RegisterDef(structureName, placeholderDef);
-                        registered++;
-                        
-                        // Also register the base name without the letter suffix
-                        if (char.IsLetter(structureName[structureName.Length - 1]) &&
-                            char.IsUpper(structureName[structureName.Length - 1]))
+                        // Use XmlReader for efficient streaming
+                        using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan))
+                        using (System.Xml.XmlReader reader = System.Xml.XmlReader.Create(fs, new System.Xml.XmlReaderSettings { IgnoreWhitespace = true, IgnoreComments = true }))
                         {
-                            string baseName = structureName.Substring(0, structureName.Length - 1);
-                            if (!SymbolRegistry.IsDefRegistered(baseName))
+                            while (reader.Read())
                             {
-                                SymbolRegistry.RegisterDef(baseName, SymbolRegistry.CreatePlaceholderDef(baseName));
-                                registered++;
+                                if (reader.NodeType == System.Xml.XmlNodeType.Element && reader.Name == "defName")
+                                {
+                                    string defName = reader.ReadElementContentAsString().Trim();
+                                    
+                                    // Register if not already registered
+                                    if (!string.IsNullOrEmpty(defName) && !registeredDefNames.Contains(defName) && !SymbolRegistry.IsDefRegistered(defName))
+                                    {
+                                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                                        SymbolRegistry.RegisterDef(defName, placeholderDef);
+                                        registeredDefNames.Add(defName);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[KCSG Unbound] Error processing XML file {file}: {ex.Message}");
+                    }
+                }
+            }
+            
+            Log.Message($"[KCSG Unbound] Registered {registeredDefNames.Count} structures for {mod.Name}");
+        }
+        
+        /// <summary>
+        /// Load structures for Alpha Books mod
+        /// </summary>
+        private static void LoadAlphaBooksStructures()
+        {
+            Log.Message("[KCSG Unbound] Loading structures for Alpha Books");
+            
+            // Critical Alpha Books symbols and structures
+            List<string> criticalBaseNames = new List<string>
+            {
+                "BookSymbol", "Library", "BookLibrary", "BookStore", 
+                "ABooks", "AB_Root", "AB_Ancient", "AB_Modern", "AB_Library",
+                "BookSymbol_Floor", "BookSymbol_Wall", "BookSymbol_Door", "BookSymbol_Light",
+                "BookSymbol_Table", "BookSymbol_Chair", "BookSymbol_Bookshelf", "BookSymbol_Shelf",
+                "BookSymbol_Computer", "BookSymbol_Kitchen", "BookSymbol_Bedroom", "BookSymbol_Library"
+            };
+            
+            // Generate structures with various prefixes
+            string[] prefixes = new[] { "", "ABooks_", "AB_", "AlphaBooks_" };
+            HashSet<string> registeredNames = new HashSet<string>();
+            int count = 0;
+            
+            foreach (var prefix in prefixes)
+            {
+                foreach (var baseName in criticalBaseNames)
+                {
+                    string defName = $"{prefix}{baseName}";
+                    if (!SymbolRegistry.IsDefRegistered(defName) && !registeredNames.Contains(defName))
+                    {
+                        try 
+                        {
+                            object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                            SymbolRegistry.RegisterDef(defName, placeholderDef);
+                            count++;
+                            registeredNames.Add(defName);
+                        }
+                        catch (Exception ex)
+                        {
+                            // Try simpler placeholder
+                            try
+                            {
+                                var basicPlaceholder = new BasicPlaceholderDef { defName = defName };
+                                SymbolRegistry.RegisterDef(defName, basicPlaceholder);
+                                count++;
+                                registeredNames.Add(defName);
+                            }
+                            catch
+                            {
+                                Log.Warning($"[KCSG Unbound] Failed to register Alpha Books structure {defName}: {ex.Message}");
+                            }
+                        }
+                    }
+                    
+                    // Register size variants
+                    string[] sizes = new[] { "Small", "Medium", "Large" };
+                    foreach (var size in sizes)
+                    {
+                        string sizedDefName = $"{prefix}{baseName}_{size}";
+                        if (!SymbolRegistry.IsDefRegistered(sizedDefName) && !registeredNames.Contains(sizedDefName))
+                        {
+                            try
+                            {
+                                object placeholderDef = SymbolRegistry.CreatePlaceholderDef(sizedDefName);
+                                SymbolRegistry.RegisterDef(sizedDefName, placeholderDef);
+                                count++;
+                                registeredNames.Add(sizedDefName);
+                            }
+                            catch
+                            {
+                                // Ignore errors
                             }
                         }
                     }
                 }
-                
-                // Also call the registry's own method that preloads definitions
-                var preloadedDefs = SymbolRegistry.PreloadCommonlyReferencedDefs();
-                
-                Log.Message($"[KCSG Unbound] Preregistered {registered} structures directly and {preloadedDefs.Count} via registry preload");
             }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error preregistering Deserter structures: {ex}");
-            }
+            
+            Log.Message($"[KCSG Unbound] Registered {count} Alpha Books structures");
         }
         
         /// <summary>
-        /// Explicitly preregister critical structures from the VBGE mod
+        /// Register structure variants with different suffixes
         /// </summary>
-        private void PreregisterVBGEStructures()
+        private static void RegisterStructureVariants(string prefix, List<string> baseNames)
         {
-            try
+            foreach (string baseName in baseNames)
             {
-                // The most critical structures causing issues in player.log
-                string[] criticalStructures = new[]
+                // Standard naming with prefix
+                string primaryDefName = $"{prefix}{baseName}";
+                if (!SymbolRegistry.IsDefRegistered(primaryDefName))
                 {
-                    // Production and mining structures with numbers that are often referenced
-                    "VBGE_Production30", "VBGE_Production10", "VBGE_Production20",
-                    "VBGE_Production1", "VBGE_Production2", "VBGE_Production3",
-                    "VBGE_Mining1", "VBGE_Mining2", "VBGE_Mining3",
-                    
-                    // Central structures for the different factions
-                    "VBGE_CentralEmpire1", "VBGE_CentralEmpire2", "VBGE_CentralEmpire3",
-                    "VBGE_TribalCenter1", "VBGE_TribalCenter2", "VBGE_TribalCenter3",
-                    
-                    // Empire specific structures
-                    "VBGE_EmpireProduction", "VBGE_EmpireMining", "VBGE_EmpireSlavery", 
-                    "VBGE_EmpireLogging", "VBGE_EmpireDefence",
-                    
-                    // Tribal specific structures
-                    "VBGE_TribalProduction", "VBGE_TribalMining", "VBGE_TribalSlavery",
-                    "VBGE_TribalLogging", "VBGE_TribalDefence", "VBGE_TribalFields",
-                    
-                    // Outlander specific structures
-                    "VBGE_OutlanderProduction", "VBGE_OutlanderMining", "VBGE_OutlanderSlavery",
-                    "VBGE_OutlanderLogging", "VBGE_OutlanderDefence", "VBGE_OutlanderFields",
-                    
-                    // Pirates specific structures
-                    "VBGE_PiratesDefence", "VBGE_PirateSlavery",
-                    
-                    // Generic structures
-                    "GenericPower", "GenericBattery", "GenericSecurity", "GenericPodLauncher",
-                    "GenericKitchen", "GenericStockpile", "GenericBedroom", "GenericGrave",
-                    "GenericRecroom", "GenericProduction"
-                };
+                    object placeholderDef = SymbolRegistry.CreatePlaceholderDef(primaryDefName);
+                    SymbolRegistry.RegisterDef(primaryDefName, placeholderDef);
+                }
                 
-                int registered = 0;
-                foreach (var structureName in criticalStructures)
+                // Letter variants (A-Z)
+                for (char letter = 'A'; letter <= 'F'; letter++)
                 {
-                    if (!SymbolRegistry.IsDefRegistered(structureName))
+                    string defName = $"{prefix}{baseName}{letter}";
+                    if (!SymbolRegistry.IsDefRegistered(defName))
                     {
-                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(structureName);
-                        SymbolRegistry.RegisterDef(structureName, placeholderDef);
-                        registered++;
-                        
-                        // Also register with the alternate VGBE prefix (both spellings appear in the files)
-                        if (structureName.StartsWith("VBGE_"))
-                        {
-                            string altName = "VGBE_" + structureName.Substring(5);
-                            if (!SymbolRegistry.IsDefRegistered(altName))
-                            {
-                                SymbolRegistry.RegisterDef(altName, SymbolRegistry.CreatePlaceholderDef(altName));
-                                registered++;
-                            }
-                        }
+                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                        SymbolRegistry.RegisterDef(defName, placeholderDef);
                     }
                 }
                 
-                Log.Message($"[KCSG Unbound] Preregistered {registered} VBGE structures directly");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error preregistering VBGE structures: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Explicitly preregister critical structures from the Alpha Books mod
-        /// </summary>
-        private void PreregisterAlphaBooksStructures()
-        {
-            try
-            {
-                // Common symbols and structures used in Alpha Books
-                string[] criticalSymbols = new[]
+                // Common suffixes
+                string[] suffixes = new[] { "Layout", "Structure", "Base", "Main", "Complex" };
+                foreach (string suffix in suffixes)
                 {
-                    // Common symbols from the Symbols.xml file
-                    "BookSymbol_Floor", "BookSymbol_Wall", "BookSymbol_Door", "BookSymbol_Light",
-                    "BookSymbol_Table", "BookSymbol_Chair", "BookSymbol_Bookshelf", "BookSymbol_Shelf",
-                    "BookSymbol_Computer", "BookSymbol_Kitchen", "BookSymbol_Bedroom", "BookSymbol_Library",
-                    
-                    // Common library structures
-                    "BookLibrary_Small", "BookLibrary_Medium", "BookLibrary_Large",
-                    "BookLibrary_Ancient", "BookLibrary_Modern", "BookLibrary_Futuristic",
-                    
-                    // Root symbols used by the mod
-                    "AB_Root", "AB_Library", "AB_Ancient", "AB_Modern", "AB_ScienceFiction"
-                };
-                
-                int registered = 0;
-                foreach (var symbolName in criticalSymbols)
-                {
-                    if (!SymbolRegistry.IsDefRegistered(symbolName))
+                    string defName = $"{prefix}{baseName}{suffix}";
+                    if (!SymbolRegistry.IsDefRegistered(defName))
                     {
-                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(symbolName);
-                        SymbolRegistry.RegisterDef(symbolName, placeholderDef);
-                        registered++;
+                        object placeholderDef = SymbolRegistry.CreatePlaceholderDef(defName);
+                        SymbolRegistry.RegisterDef(defName, placeholderDef);
                     }
                 }
-                
-                Log.Message($"[KCSG Unbound] Preregistered {registered} Alpha Books symbols directly");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error preregistering Alpha Books structures: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Explicitly preregister critical structures from the VFE Mechanoids mod
-        /// </summary>
-        private void PreregisterVFEMechanoidStructures()
-        {
-            try
-            {
-                // The most critical structures causing issues in player.log
-                string[] criticalStructures = new[]
-                {
-                    // Mechanoids
-                    "VFE_Mechanoid_1", "VFE_Mechanoid_2", "VFE_Mechanoid_3",
-                    "VFE_Mechanoid_4", "VFE_Mechanoid_5", "VFE_Mechanoid_6",
-                    "VFE_Mechanoid_7", "VFE_Mechanoid_8", "VFE_Mechanoid_9",
-                    "VFE_Mechanoid_10", "VFE_Mechanoid_11", "VFE_Mechanoid_12",
-                    "VFE_Mechanoid_13", "VFE_Mechanoid_14", "VFE_Mechanoid_15",
-                    "VFE_Mechanoid_16", "VFE_Mechanoid_17", "VFE_Mechanoid_18",
-                    "VFE_Mechanoid_19", "VFE_Mechanoid_20"
-                };
-                
-                int registered = 0;
-                foreach (var structureName in criticalStructures)
-                {
-                    if (!SymbolRegistry.IsDefRegistered(structureName))
-                    {
-                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(structureName);
-                        SymbolRegistry.RegisterDef(structureName, placeholderDef);
-                        registered++;
-                    }
-                }
-                
-                Log.Message($"[KCSG Unbound] Preregistered {registered} VFE Mechanoids structures directly");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error preregistering VFE Mechanoids structures: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Explicitly preregister critical structures from the VFE Medieval mod
-        /// </summary>
-        private void PreregisterVFEMedievalStructures()
-        {
-            try
-            {
-                // The most critical structures causing issues in player.log
-                string[] criticalStructures = new[]
-                {
-                    // Medieval structures
-                    "VFE_Medieval_1", "VFE_Medieval_2", "VFE_Medieval_3",
-                    "VFE_Medieval_4", "VFE_Medieval_5", "VFE_Medieval_6",
-                    "VFE_Medieval_7", "VFE_Medieval_8", "VFE_Medieval_9",
-                    "VFE_Medieval_10", "VFE_Medieval_11", "VFE_Medieval_12",
-                    "VFE_Medieval_13", "VFE_Medieval_14", "VFE_Medieval_15",
-                    "VFE_Medieval_16", "VFE_Medieval_17", "VFE_Medieval_18",
-                    "VFE_Medieval_19", "VFE_Medieval_20"
-                };
-                
-                int registered = 0;
-                foreach (var structureName in criticalStructures)
-                {
-                    if (!SymbolRegistry.IsDefRegistered(structureName))
-                    {
-                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(structureName);
-                        SymbolRegistry.RegisterDef(structureName, placeholderDef);
-                        registered++;
-                    }
-                }
-                
-                Log.Message($"[KCSG Unbound] Preregistered {registered} VFE Medieval structures directly");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error preregistering VFE Medieval structures: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Explicitly preregister critical structures from the Save Our Ship 2 mod
-        /// </summary>
-        private void PreregisterSaveOurShipStructures()
-        {
-            try
-            {
-                // The most critical structures causing issues in player.log
-                string[] criticalStructures = new[]
-                {
-                    // Ships
-                    "SOS2_Ship_1", "SOS2_Ship_2", "SOS2_Ship_3",
-                    "SOS2_Ship_4", "SOS2_Ship_5", "SOS2_Ship_6",
-                    "SOS2_Ship_7", "SOS2_Ship_8", "SOS2_Ship_9",
-                    "SOS2_Ship_10", "SOS2_Ship_11", "SOS2_Ship_12",
-                    "SOS2_Ship_13", "SOS2_Ship_14", "SOS2_Ship_15",
-                    "SOS2_Ship_16", "SOS2_Ship_17", "SOS2_Ship_18",
-                    "SOS2_Ship_19", "SOS2_Ship_20"
-                };
-                
-                int registered = 0;
-                foreach (var structureName in criticalStructures)
-                {
-                    if (!SymbolRegistry.IsDefRegistered(structureName))
-                    {
-                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(structureName);
-                        SymbolRegistry.RegisterDef(structureName, placeholderDef);
-                        registered++;
-                    }
-                }
-                
-                Log.Message($"[KCSG Unbound] Preregistered {registered} Save Our Ship 2 structures directly");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error preregistering Save Our Ship 2 structures: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Explicitly preregister critical structures from the Vanilla Outposts Expanded mod
-        /// </summary>
-        private void PreregisterVanillaOutpostsStructures()
-        {
-            try
-            {
-                // The most critical structures causing issues in player.log
-                string[] criticalStructures = new[]
-                {
-                    // Outposts
-                    "VOE_Outpost_1", "VOE_Outpost_2", "VOE_Outpost_3",
-                    "VOE_Outpost_4", "VOE_Outpost_5", "VOE_Outpost_6",
-                    "VOE_Outpost_7", "VOE_Outpost_8", "VOE_Outpost_9",
-                    "VOE_Outpost_10", "VOE_Outpost_11", "VOE_Outpost_12",
-                    "VOE_Outpost_13", "VOE_Outpost_14", "VOE_Outpost_15",
-                    "VOE_Outpost_16", "VOE_Outpost_17", "VOE_Outpost_18",
-                    "VOE_Outpost_19", "VOE_Outpost_20"
-                };
-                
-                int registered = 0;
-                foreach (var structureName in criticalStructures)
-                {
-                    if (!SymbolRegistry.IsDefRegistered(structureName))
-                    {
-                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(structureName);
-                        SymbolRegistry.RegisterDef(structureName, placeholderDef);
-                        registered++;
-                    }
-                }
-                
-                Log.Message($"[KCSG Unbound] Preregistered {registered} Vanilla Outposts Expanded structures directly");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error preregistering Vanilla Outposts Expanded structures: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Explicitly preregister critical structures from the VFE Ancients mod
-        /// </summary>
-        private void PreregisterVFEAncientsStructures()
-        {
-            try
-            {
-                // The most critical structures causing issues in player.log
-                string[] criticalStructures = new[]
-                {
-                    // Ancient structures
-                    "VFEA_AncientHouse", "VFEA_AncientTent", "VFEA_AncientKeep", "VFEA_AncientCastle",
-                    "VFEA_AncientLabratory", "VFEA_AncientTemple", "VFEA_AncientFarm", "VFEA_AncientVault",
-                    "VFEA_AncientSlingshot", "VFEA_AbandonedSlingshot", "VFEA_LootedVault", "VFEA_SealedVault",
-                    
-                    // Common vault structures from expansions
-                    "SealedVaultKilo1", "SealedVaultKilo2", "SealedVaultKilo3", "SealedVaultCrow", 
-                    "SealedVaultBadger", "SealedVaultBear", "SealedVaultMole", "SealedVaultFox", 
-                    "SealedVaultMouse", "SealedVaultOx", "SealedVaultTurtle", "SealedVaultEagle", 
-                    "SealedVaultOwl", "SealedGeneBankVault", "SealedOutpostVault", "SealedWarehouseVault",
-                    "AgriculturalResearchVault",
-                    
-                    // Tree vaults from Soups Vault Collection
-                    "VFEA_SV_RedwoodVault", "VFEA_SV_MangroveVault", "VFEA_SV_BonsaiVault", 
-                    "VFEA_SV_CedarVault", "VFEA_SV_MagnoliaVault", "VFEA_SV_OakVault", 
-                    "VFEA_SV_SequoiaVault", "VFEA_SV_SycamoreVault", "VFEA_SV_ManukaVault",
-                    "VFEA_SV_MapleVault", "VFEA_SV_PandoVault", "VFEA_SV_BlackwoodVault",
-                    "VFEA_SV_BristleconeVault", "VFEA_SV_BirchVault"
-                };
-                
-                int registered = 0;
-                foreach (var structureName in criticalStructures)
-                {
-                    if (!SymbolRegistry.IsDefRegistered(structureName))
-                    {
-                        var placeholderDef = SymbolRegistry.CreatePlaceholderDef(structureName);
-                        SymbolRegistry.RegisterDef(structureName, placeholderDef);
-                        registered++;
-                    }
-                }
-                
-                Log.Message($"[KCSG Unbound] Preregistered {registered} VFE Ancients structures directly");
-            }
-            catch (Exception ex)
-            {
-                LogStartupError($"Error preregistering VFE Ancients structures: {ex}");
             }
         }
     }

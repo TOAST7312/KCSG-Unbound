@@ -243,4 +243,86 @@ namespace KCSG
             }
         }
     }
+
+    /// <summary>
+    /// Extensions for RimWorld API compatibility
+    /// </summary>
+    public static class RimWorldCompatibilityExtensions
+    {
+        /// <summary>
+        /// Get version string for a mod, handling API changes between RimWorld versions
+        /// </summary>
+        public static string VersionString(this ModContentPack mod)
+        {
+            if (mod == null)
+                return "Unknown";
+            
+            // Try to get the version from the PackageId and manifest if available
+            try
+            {
+                // First try from mod metadata
+                if (mod.ModMetaData != null)
+                {
+                    // Try to access Version property via reflection since it might be missing
+                    try
+                    {
+                        var versionProperty = typeof(ModMetaData).GetProperty("Version");
+                        if (versionProperty != null)
+                        {
+                            string version = versionProperty.GetValue(mod.ModMetaData) as string;
+                            if (!string.IsNullOrEmpty(version))
+                            {
+                                return version;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore reflection errors and fall through to next method
+                    }
+                }
+                
+                // Then try the packageId which sometimes contains version info
+                string packageId = mod.PackageId ?? "Unknown";
+                if (packageId.Contains("."))
+                {
+                    string[] parts = packageId.Split('.');
+                    if (parts.Length > 1 && IsVersionFormat(parts[parts.Length - 1]))
+                    {
+                        return parts[parts.Length - 1];
+                    }
+                }
+                
+                // Finally, just use packageId as version identifier
+                return packageId;
+            }
+            catch
+            {
+                return mod.PackageId ?? "Unknown";
+            }
+        }
+        
+        /// <summary>
+        /// Check if a string looks like a version number
+        /// </summary>
+        private static bool IsVersionFormat(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+            
+            // Simple heuristic - contains a digit and has a dot or period
+            bool hasDigit = false;
+            bool hasDot = false;
+            
+            foreach (char c in text)
+            {
+                if (char.IsDigit(c))
+                    hasDigit = true;
+                else if (c == '.' || c == '-')
+                    hasDot = true;
+            }
+            
+            return hasDigit && hasDot;
+        }
+    }
 } 

@@ -1,115 +1,187 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using UnityEngine;
+using System.Text;
 using Verse;
 
 namespace KCSG
 {
     /// <summary>
-    /// Utility for capturing diagnostic information
+    /// Handles diagnostic logging for KCSG Unbound
     /// </summary>
     public static class Diagnostics
     {
-        private static List<string> startupMessages = new List<string>();
-        private static bool hasDumped = false;
+        // Whether verbose logging is enabled
+        private static bool verboseLogging = false;
+        
+        // Path to the diagnostic log file
+        private static string diagnosticLogPath = null;
+        
+        // StringBuilder to buffer log messages
+        private static StringBuilder logBuffer = new StringBuilder();
+        
+        // Time of last flush
+        private static DateTime lastFlush = DateTime.MinValue;
+        
+        // Track if initialized
+        private static bool initialized = false;
         
         /// <summary>
-        /// Safely log a diagnostic message
-        /// </summary>
-        public static void LogDiagnostic(string message)
-        {
-            try
-            {
-                startupMessages.Add($"[{DateTime.Now.ToString("HH:mm:ss.fff")}] {message}");
-                Log.Message($"[KCSG Diagnostics] {message}");
-            }
-            catch
-            {
-                // Silently fail
-            }
-        }
-        
-        /// <summary>
-        /// Dump diagnostic info to a file
-        /// </summary>
-        public static void DumpDiagnostics()
-        {
-            if (hasDumped) return;
-            
-            try
-            {
-                string path = Path.Combine(Application.persistentDataPath, "KCSG_Startup_Diagnostic.log");
-                
-                string content = $"=== KCSG Unbound Startup Diagnostic: {DateTime.Now} ===\n\n";
-                content += $"Unity Version: {Application.unityVersion}\n";
-                content += $"Platform: {Application.platform}\n";
-                content += $"Product Name: {Application.productName}\n";
-                content += $"System Memory: {SystemInfo.systemMemorySize} MB\n";
-                content += $"Processor: {SystemInfo.processorType}\n";
-                content += $"Graphics Card: {SystemInfo.graphicsDeviceName}\n\n";
-                
-                content += "=== Startup Log ===\n";
-                foreach (var msg in startupMessages)
-                {
-                    content += msg + "\n";
-                }
-                
-                content += "\n=== Assemblies ===\n";
-                try
-                {
-                    foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-                    {
-                        content += $"{assembly.FullName}\n";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    content += $"Error getting assemblies: {ex.Message}\n";
-                }
-                
-                File.WriteAllText(path, content);
-                hasDumped = true;
-                
-                LogDiagnostic($"Startup diagnostic written to {path}");
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[KCSG Diagnostics] Failed to write diagnostics: {ex}");
-            }
-        }
-        
-        /// <summary>
-        /// Setup diagnostics collector
+        /// Initialize the diagnostics system
         /// </summary>
         public static void Initialize()
         {
-            LogDiagnostic("Diagnostics initialized");
-            
-            // Schedule diagnostics to be dumped at the end of loading
-            LongEventHandler.ExecuteWhenFinished(DumpDiagnostics);
-            
-            // Also set a backup timer to dump in case the normal flow is interrupted
-            GameObject go = new GameObject("KCSG_DiagnosticDumper");
-            var component = go.AddComponent<DiagnosticDumper>();
-            UnityEngine.Object.DontDestroyOnLoad(go);
+            if (initialized)
+                return;
+                
+            try
+            {
+                // Set up the log path
+                diagnosticLogPath = Path.Combine(GenFilePaths.ConfigFolderPath, "KCSG_Unbound_Diagnostics.log");
+                
+                // Create a new log file
+                using (StreamWriter writer = new StreamWriter(diagnosticLogPath, false))
+                {
+                    writer.WriteLine($"[{DateTime.Now}] KCSG Unbound diagnostic log initialized");
+                    writer.WriteLine("----------------------------------------");
+                }
+                
+                initialized = true;
+                Log.Message("[KCSG Unbound] Diagnostic logging initialized");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[KCSG Unbound] Failed to initialize diagnostic logging: {ex.Message}");
+            }
         }
         
         /// <summary>
-        /// Component to ensure diagnostics are dumped
+        /// Set verbose logging mode
         /// </summary>
-        private class DiagnosticDumper : MonoBehaviour
+        public static void SetVerboseLogging(bool enabled)
         {
-            private float timeToWait = 30f;
+            verboseLogging = enabled;
+            LogDiagnostic($"Verbose logging {(enabled ? "enabled" : "disabled")}");
+        }
+        
+        /// <summary>
+        /// Log a diagnostic message
+        /// </summary>
+        public static void LogDiagnostic(string message, bool force = false)
+        {
+            if (!initialized)
+                Initialize();
             
-            public void Update()
+            try
             {
-                timeToWait -= Time.deltaTime;
-                if (timeToWait <= 0f)
+                // Add timestamp
+                string timestampedMessage = $"[{DateTime.Now}] {message}";
+                
+                // Add to buffer
+                lock (logBuffer)
                 {
-                    DumpDiagnostics();
-                    Destroy(this);
+                    logBuffer.AppendLine(timestampedMessage);
                 }
+                
+                // Check if we should flush
+                if (force || (DateTime.Now - lastFlush).TotalSeconds > 5)
+                {
+                    FlushLogBuffer();
+                }
+            }
+            catch
+            {
+                // Ignore errors during logging
+            }
+        }
+        
+        /// <summary>
+        /// Log verbose diagnostic information
+        /// </summary>
+        public static void LogVerbose(string message)
+        {
+            if (verboseLogging)
+            {
+                LogDiagnostic($"[VERBOSE] {message}");
+            }
+            else
+            {
+                // Still log to file but not console
+                TryAppendToFile($"[{DateTime.Now}] [VERBOSE] {message}");
+            }
+        }
+        
+        /// <summary>
+        /// Log warning information to diagnostics
+        /// </summary>
+        public static void LogWarning(string message)
+        {
+            LogDiagnostic($"[WARNING] {message}");
+            
+            // Also log to main log if verbose is enabled
+            if (verboseLogging)
+            {
+                Log.Warning($"[KCSG Unbound] {message}");
+            }
+        }
+        
+        /// <summary>
+        /// Log error information to diagnostics
+        /// </summary>
+        public static void LogError(string message)
+        {
+            LogDiagnostic($"[ERROR] {message}", true);
+            Log.Error($"[KCSG Unbound] {message}");
+        }
+        
+        /// <summary>
+        /// Flush the log buffer to disk
+        /// </summary>
+        private static void FlushLogBuffer()
+        {
+            try
+            {
+                string bufferContent;
+                
+                // Extract and clear buffer
+                lock (logBuffer)
+                {
+                    if (logBuffer.Length == 0)
+                        return;
+                        
+                    bufferContent = logBuffer.ToString();
+                    logBuffer.Clear();
+                }
+                
+                // Write to file
+                TryAppendToFile(bufferContent);
+                
+                lastFlush = DateTime.Now;
+            }
+            catch
+            {
+                // Ignore errors during flushing
+            }
+        }
+        
+        /// <summary>
+        /// Try to append text to the log file
+        /// </summary>
+        private static void TryAppendToFile(string content)
+        {
+            if (string.IsNullOrEmpty(diagnosticLogPath))
+                return;
+            
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(diagnosticLogPath, true))
+                {
+                    writer.Write(content);
+                }
+            }
+            catch
+            {
+                // Ignore file IO errors
             }
         }
     }

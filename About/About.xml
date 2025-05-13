@@ -34,4 +34,8 @@ This mod was created with AI assistance using Claude 3.7 Sonnet. If you have iss
   <loadAfter>
     <li>brrainz.harmony</li>
   </loadAfter>
+  <loadBefore>
+	<li>bs.fishery</li>
+	<li>oskarpotocki.vanillafactionsexpanded.core</li>
+  </loadBefore>
 </ModMetaData> 
